@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-barrecon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-barrecon}
+      TZ: ${TZ:-America/Vancouver}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-barrecon}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-barrecon}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-barrecon}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-to-a-long-random-string}
+      TIMEZONE: ${TZ:-America/Vancouver}
+      SWYPE_EMAIL: ${SWYPE_EMAIL:-}
+      SWYPE_PASSWORD: ${SWYPE_PASSWORD:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TZ: ${TZ:-America/Vancouver}
+      HOST: 0.0.0.0
+    ports:
+      - "${PORT:-8080}:8000"   # localhost only; use "${PORT:-8080}:8000" to reach it from the LAN
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      TZ: ${TZ:-America/Vancouver}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          pg_dump -h db -U ${POSTGRES_USER:-barrecon} ${POSTGRES_DB:-barrecon} | gzip > /backups/barrecon-$$(date +%F).sql.gz
+          find /backups -name 'barrecon-*.sql.gz' -mtime +60 -delete
+          sleep 86400
+        done
+    restart: unless-stopped
+
+volumes:
+  pgdata:

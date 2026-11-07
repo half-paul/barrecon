@@ -1,0 +1,56 @@
+{
+  "menuUnitsSold": 130,
+  "shortages": 3,
+  "surpluses": 1,
+  "matches": 2,
+  "ingredients": [
+    {
+      "ingredientId": "chicken",
+      "baseUnit": "g",
+      "recipeUsage": 8100,
+      "expectedClosing": 6900,
+      "actualClosing": 6500,
+      "variance": -400
+    },
+    {
+      "ingredientId": "tomato",
+      "baseUnit": "g",
+      "recipeUsage": 6100,
+      "expectedClosing": 3900,
+      "actualClosing": 4000,
+      "variance": 100
+    },
+    {
+      "ingredientId": "bread",
+      "baseUnit": "each",
+      "recipeUsage": 90,
+      "expectedClosing": 30,
+      "actualClosing": 30,
+      "variance": 0
+    },
+    {
+      "ingredientId": "prosecco",
+      "baseUnit": "mL",
+      "recipeUsage": 5850,
+      "expectedClosing": 3150,
+      "actualClosing": 3000,
+      "variance": -150
+    },
+    {
+      "ingredientId": "aperol",
+      "baseUnit": "mL",
+      "recipeUsage": 2400,
+      "expectedClosing": 1300,
+      "actualClosing": 1150,
+      "variance": -150
+    },
+    {
+      "ingredientId": "soda",
+      "baseUnit": "mL",
+      "recipeUsage": 4000,
+      "expectedClosing": 4000,
+      "actualClosing": 4000,
+      "variance": 0
+    }
+  ]
+}

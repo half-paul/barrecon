@@ -1,0 +1,194 @@
+{
+  "schemaVersion": "1.0",
+  "sampleData": true,
+  "locationId": "demo-restaurant",
+  "period": {
+    "start": "2026-10-30T09:00:00-07:00",
+    "end": "2026-10-31T02:00:00-07:00",
+    "timezone": "America/Vancouver"
+  },
+  "assumptions": {
+    "recipeCoverage": "Selected tracked ingredients only; not complete recipes",
+    "houseFluidOunceMl": 30,
+    "wasteAndTransfers": 0,
+    "countsAtPeriodEnd": true,
+    "foodQuantities": "Raw inventory-equivalent quantities"
+  },
+  "ingredients": [
+    {
+      "id": "chicken",
+      "name": "Chicken",
+      "baseUnit": "g",
+      "displayUnit": "kg",
+      "displayFactor": 1000,
+      "opening": 10000,
+      "received": 5000,
+      "counted": 6500,
+      "waste": 0,
+      "transferIn": 0,
+      "transferOut": 0,
+      "adjustment": 0
+    },
+    {
+      "id": "tomato",
+      "name": "Tomato",
+      "baseUnit": "g",
+      "displayUnit": "kg",
+      "displayFactor": 1000,
+      "opening": 8000,
+      "received": 2000,
+      "counted": 4000,
+      "waste": 0,
+      "transferIn": 0,
+      "transferOut": 0,
+      "adjustment": 0
+    },
+    {
+      "id": "bread",
+      "name": "Bread slices",
+      "baseUnit": "each",
+      "displayUnit": "pcs",
+      "displayFactor": 1,
+      "opening": 80,
+      "received": 40,
+      "counted": 30,
+      "waste": 0,
+      "transferIn": 0,
+      "transferOut": 0,
+      "adjustment": 0
+    },
+    {
+      "id": "prosecco",
+      "name": "Prosecco",
+      "baseUnit": "mL",
+      "displayUnit": "L",
+      "displayFactor": 1000,
+      "opening": 6000,
+      "received": 3000,
+      "counted": 3000,
+      "waste": 0,
+      "transferIn": 0,
+      "transferOut": 0,
+      "adjustment": 0
+    },
+    {
+      "id": "aperol",
+      "name": "Aperol",
+      "baseUnit": "mL",
+      "displayUnit": "L",
+      "displayFactor": 1000,
+      "opening": 3000,
+      "received": 700,
+      "counted": 1150,
+      "waste": 0,
+      "transferIn": 0,
+      "transferOut": 0,
+      "adjustment": 0
+    },
+    {
+      "id": "soda",
+      "name": "Soda",
+      "baseUnit": "mL",
+      "displayUnit": "L",
+      "displayFactor": 1000,
+      "opening": 6000,
+      "received": 2000,
+      "counted": 4000,
+      "waste": 0,
+      "transferIn": 0,
+      "transferOut": 0,
+      "adjustment": 0
+    }
+  ],
+  "menuItems": [
+    {
+      "id": "caesar",
+      "name": "Chicken Caesar salad",
+      "category": "Food",
+      "sold": 30,
+      "recipeVersion": "demo-v1",
+      "ingredients": [
+        {
+          "ingredientId": "chicken",
+          "quantity": 150
+        },
+        {
+          "ingredientId": "tomato",
+          "quantity": 80
+        }
+      ]
+    },
+    {
+      "id": "sandwich",
+      "name": "Chicken sandwich",
+      "category": "Food",
+      "sold": 20,
+      "recipeVersion": "demo-v1",
+      "ingredients": [
+        {
+          "ingredientId": "chicken",
+          "quantity": 180
+        },
+        {
+          "ingredientId": "tomato",
+          "quantity": 60
+        },
+        {
+          "ingredientId": "bread",
+          "quantity": 2
+        }
+      ]
+    },
+    {
+      "id": "bruschetta",
+      "name": "Bruschetta",
+      "category": "Food",
+      "sold": 25,
+      "recipeVersion": "demo-v1",
+      "ingredients": [
+        {
+          "ingredientId": "tomato",
+          "quantity": 100
+        },
+        {
+          "ingredientId": "bread",
+          "quantity": 2
+        }
+      ]
+    },
+    {
+      "id": "spritz",
+      "name": "Aperol Spritz",
+      "category": "Beverage",
+      "sold": 40,
+      "recipeVersion": "demo-v1",
+      "ingredients": [
+        {
+          "ingredientId": "aperol",
+          "quantity": 60
+        },
+        {
+          "ingredientId": "prosecco",
+          "quantity": 90
+        },
+        {
+          "ingredientId": "soda",
+          "quantity": 100
+        }
+      ]
+    },
+    {
+      "id": "glass",
+      "name": "Prosecco glass",
+      "category": "Beverage",
+      "sold": 15,
+      "recipeVersion": "demo-v1",
+      "ingredients": [
+        {
+          "ingredientId": "prosecco",
+          "quantity": 150
+        }
+      ]
+    }
+  ]
+}
