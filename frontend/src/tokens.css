@@ -21,6 +21,14 @@
   --color-ok: oklch(71.5% 0.11 159);
   --color-ok-soft: oklch(23.5% 0.027 157);
   --color-info: oklch(69.5% 0.111 253);
+  --color-info-soft: oklch(24.5% 0.035 254);
+  /* side menu: a deep navy rail in both themes */
+  --color-nav: oklch(15.5% 0.022 258);
+  --color-nav-ink: oklch(96% 0.006 255);
+  --color-nav-muted: oklch(76% 0.025 255);
+  --color-nav-line: oklch(27% 0.03 258);
+  --color-nav-hover: oklch(22% 0.035 258);
+  --color-nav-active: oklch(30% 0.06 258);
   --color-danger: oklch(74% 0.126 28);
   --color-danger-soft: oklch(23.3% 0.035 29);
   --color-error: oklch(74% 0.126 28);
@@ -39,8 +47,9 @@
   --text-xs: 0.75rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.2rem; --text-xl: 1.44rem; --text-2xl: 1.728rem; --text-3xl: 2.074rem;
   --text-display-s: 1.44rem; --text-display: 1.728rem; --text-section: 1.2rem; --text-title: 1rem; --text-lead: 1rem;
 
-  --radius-card: 8px; --radius-control: 6px; --radius-chip: 4px; --radius-pill: 999px;
+  --radius-panel: 14px; --radius-card: 8px; --radius-control: 6px; --radius-chip: 4px; --radius-pill: 999px;
   --shadow-card: 0 8px 24px oklch(12% 0.006 237 / 0.45);
+  --shadow-panel: 0 1px 2px oklch(10% 0.006 237 / 0.4);
   --tracking-display: -0.015em;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.7, 0, 0.84, 0); --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 }
@@ -79,6 +88,13 @@
   --color-ok: oklch(51.5% 0.11 157);
   --color-ok-soft: oklch(95% 0.021 161);
   --color-info: oklch(52.8% 0.132 254);
+  --color-info-soft: oklch(95% 0.022 254);
+  --color-nav: oklch(27% 0.075 262);
+  --color-nav-ink: oklch(98% 0.004 255);
+  --color-nav-muted: oklch(84% 0.03 258);
+  --color-nav-line: oklch(36% 0.07 262);
+  --color-nav-hover: oklch(33% 0.08 262);
+  --color-nav-active: oklch(45% 0.13 260);
   --color-danger: oklch(51.8% 0.163 29);
   --color-danger-soft: oklch(94.3% 0.022 28);
   --color-error: oklch(51.8% 0.163 29);
@@ -86,4 +102,5 @@
   --color-expected: oklch(73.7% 0.014 244);
   --color-edge: oklch(58% 0.016 243);
   --shadow-card: 0 8px 24px oklch(24.5% 0.01 248 / 0.12);
+  --shadow-panel: 0 1px 3px oklch(24.5% 0.02 248 / 0.07), 0 1px 1px oklch(24.5% 0.02 248 / 0.04);
 }

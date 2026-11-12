@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type ChartStyle, type CountPage, type PostedCount, type Settings, type UserPrefs, type VariancePool, type VarianceReport, type VarianceRow, d, day, dayRanges, dt, n } from "../lib/api";
 import { Empty, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
-import VarianceScatter from "./VarianceScatter";
+import VarianceScatter, { sellingName } from "./VarianceScatter";
+import { Icon, type IconName } from "../lib/icons";
 
 // Ledger layout from docs/food-inventory-ai-handoff, in the app’s Night Shift style. Wording follows that brief:
 // Should be left = opening + in − out − recipe usage − recorded waste; Actually left = closing count;
@@ -121,30 +122,31 @@ export default function Variance() {
   });
   const row = (x: Line) => <Section key={x.item_id} x={x} q={q} open={expanded.has(x.item_id)} onToggle={(o) => setOpen(x.item_id, o)} threshold={r!.threshold_pct} />;
 
-  return (
-    <Page title="Stock vs sales" sub={r ? `${d(r.opening.counted_at)} count → ${d(r.closing.counted_at)} count` : "Sold × recipe against what the counts say is left"}>
+  // the tiles count what's in view: each individual item, and each set of alternatives once
+  const poolLines = pools.map((p) => ({ p, ...derivePool(p) }));
+  // one bucket each, as on the sample: major = off by the threshold or more (either way), minor = short but under it
+  const checked = [...shown.map((x) => ({ kind: x.kind, status: x.status })), ...poolLines.map((x) => ({ kind: x.kind, status: x.p.status }))]
+    .filter((x) => x.kind !== "not_counted");
+  const majorN = checked.filter((x) => x.status === "off").length;
+  const minorN = checked.filter((x) => x.status !== "off" && x.kind === "short").length;
+  const onTarget = checked.length - majorN - minorN;
+  const jump = (f: Filter) => { setFilter(f); requestAnimationFrame(() => document.getElementById("individual")?.scrollIntoView({ behavior: "smooth", block: "start" })); };
+  const ledgerHead = <div aria-hidden className="lg-cols lg-head band max-md:hidden"><span>Stock item</span><span className="text-right">Should be left</span><span className="text-right">Actually left</span><span className="text-right">Difference</span></div>;
 
-        {total != null && total >= 2 && (<>
-          <div className="flex flex-wrap items-center gap-3 mb-3">
-            <CountRange counts={counts} total={total} report={r ?? null} url={opening ? { from: opening, to: closing } : null} draft={draft}
-              onMore={() => loadCounts(counts.length)}
-              onPick={(from, to, valid) => {
-                if (!valid) { setDraft({ from, to }); return; }
-                setDraft(null); setQuietPicked(null);
-                setParams({ p: `${from}:${to}` }, { replace: true });
-              }} />
-            <input className={`${inputCls} w-full sm:w-56`} type="search" placeholder="Search items…" aria-label="Search stock items" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div role="group" aria-label="Filter by difference" className="inline-flex flex-wrap rounded-control border border-line overflow-hidden text-sm">
-              {FILTERS.map(([k, label]) => (
-                <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}
-                  className={`px-3 py-1.5 ${filter === k ? "bg-raised text-ink font-medium" : "bg-surface text-muted hover:text-ink"}`}>
-                  {label}{r && k !== "all" ? <span className="mono text-xs text-faint ml-1">{count(k)}</span> : null}
-                </button>))}
-            </div>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={packs} onChange={(e) => setPacks(e.target.checked)} /> bottles / kegs instead of L</label>
-          </div>
-          {moreError && <Notice kind="error">Couldn’t load more counts: {moreError}</Notice>}
-        </>)}
+  return (
+    <Page title="Stock vs sales" sub={r ? `${d(r.opening.counted_at)} count to ${d(r.closing.counted_at)} count · stock vs expected usage` : "Sold × recipe against what the counts say is left"}
+      actions={total != null && total >= 2 ? (
+        <div className="flex items-center gap-2 rounded-panel border border-line bg-paper-2 shadow-[var(--shadow-panel)] px-3 py-1.5">
+          <Icon name="calendar" size={16} className="text-muted" />
+          <CountRange counts={counts} total={total} report={r ?? null} url={opening ? { from: opening, to: closing } : null} draft={draft}
+            onMore={() => loadCounts(counts.length)}
+            onPick={(from, to, valid) => {
+              if (!valid) { setDraft({ from, to }); return; }
+              setDraft(null); setQuietPicked(null);
+              setParams({ p: `${from}:${to}` }, { replace: true });
+            }} />
+        </div>) : undefined}>
+        {moreError && <Notice kind="error">Couldn’t load more counts: {moreError}</Notice>}
 
         {report.loading && !report.data && !report.error && <Loading rows={8} />}
         {report.error && (total != null && total < 2
@@ -152,19 +154,20 @@ export default function Variance() {
               <br /><Link className="underline text-accent" to="/">See what’s still missing on the Overview</Link></Empty>
           : <Notice kind="error">{report.error}</Notice>)}
 
-        {r && (<>
-          <div className="flex flex-wrap gap-x-7 gap-y-2 py-3 mb-4 border-y border-line text-sm text-muted">
-            <span><b className="text-xl font-semibold text-ink mr-1 num">{shown.length}</b>stock items</span>
-            <span className="text-danger"><b className="text-xl font-semibold mr-1 num">{count("short")}</b>short</span>
-            <span><b className="text-xl font-semibold text-ink mr-1 num">{count("over")}</b>over</span>
-            <span><b className="text-xl font-semibold text-ink mr-1 num">{count("matches")}</b>match</span>
-            <span><b className="text-xl font-semibold text-ink mr-1 num">{notCounted}</b>not counted</span>
-            <span><b className={`text-xl font-semibold mr-1 num ${off ? "text-danger" : "text-ink"}`}>{off}</b>off by {n(r.threshold_pct, 0)}% or more</span>
-            {pools.length > 0 && <a href="#alternatives" className="hover:text-ink"><b className="text-xl font-semibold text-ink mr-1 num">{poolItems}</b>with alternatives{poolsShort > 0 && <span className="text-danger"> · {poolsShort} set{poolsShort === 1 ? "" : "s"} short</span>}</a>}
-            {r.unmapped.length > 0 && <span><b className="text-xl font-semibold text-ink mr-1 num">{r.unmapped.length}</b>sold with no recipe</span>}
+        {r && (<div className="flex flex-col gap-5">
+          <div className="kpis">
+            <Kpi icon="boxes" tone="bg-paper-3 text-ink-2" label="Total stock items" value={shown.length + poolItems}
+              note={[pools.length ? `${poolItems} in ${pools.length} set${pools.length === 1 ? "" : "s"} of alternatives` : null, notCounted ? `${notCounted} not counted` : null].filter(Boolean).join(" · ") || null}
+              onClick={() => jump("all")} />
+            <Kpi icon="check" tone="bg-ok-soft text-ok" valueCls="text-ok" label="On target" value={onTarget} note={`matching, or over by less than ${n(r.threshold_pct, 0)}%`} onClick={() => { setQuietPicked(true); requestAnimationFrame(() => document.getElementById("quiet")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} />
+            <Kpi icon="warn" tone="bg-amber-soft text-amber" valueCls={minorN ? "text-amber" : ""} label="Minor shortage" value={minorN} note={`short by less than ${n(r.threshold_pct, 0)}%`} onClick={() => jump("short")} />
+            <Kpi icon="alert" tone="bg-danger-soft text-danger" valueCls={majorN ? "text-danger" : ""} label="Major difference" value={majorN} note={`off by ${n(r.threshold_pct, 0)}% or more, short or over`} onClick={() => jump("all")} />
           </div>
-          <Coverage r={r} />
-          {r.between_counts > 0 && <Notice>{r.between_counts} count{r.between_counts === 1 ? "" : "s"} between {d(r.opening.counted_at)} and {d(r.closing.counted_at)} {r.between_counts === 1 ? "is" : "are"} ignored. This compares the From count with the To count, using every sale and stock movement in between.</Notice>}
+
+          {(r.between_counts > 0 || r.sales_periods.length === 0 || r.missing_sales_days.length > 0 || r.straddling_periods.length > 0 || r.no_movements_recorded) && <div>
+            <Coverage r={r} />
+            {r.between_counts > 0 && <Notice>{r.between_counts} count{r.between_counts === 1 ? "" : "s"} between {d(r.opening.counted_at)} and {d(r.closing.counted_at)} {r.between_counts === 1 ? "is" : "are"} ignored. This compares the From count with the To count, using every sale and stock movement in between.</Notice>}
+          </div>}
 
           {(all.length > 0 || pools.length > 0) && <VarianceScatter rows={shown} pools={pools} threshold={r.threshold_pct} needle={needle} q={q} qUnit={qUnit}
             onPickPool={(p) => requestAnimationFrame(() => document.getElementById(`pool-${p.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }))}
@@ -176,72 +179,95 @@ export default function Variance() {
             requestAnimationFrame(() => document.getElementById(`item-${x.item_id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
           }} />}
           {all.length > 0 && <Chart lines={all} />}
-          {pools.length > 0 && (
-            <div className="mt-6 -mb-3">
-              <h2 className="font-semibold">Individual stock items</h2>
-              <p className="text-xs text-muted">Stock items not used as alternatives in any recipe. Those are checked together <a className="underline" href="#alternatives">below</a>.</p>
-            </div>)}
-          {all.length > 0 && (
-            <div className="flex items-center justify-between gap-3 mt-6 mb-2">
-              <button type="button" className="text-sm text-muted hover:text-ink underline" aria-expanded={choosing} onClick={() => setChoosing((v) => !v)}>
-                {choosing ? "Done" : `Add / remove items (${shown.length} of ${all.length})`}
-              </button>
-              {visible.length > 0 && <button type="button" className="text-sm text-muted hover:text-ink underline"
-                onClick={() => setExpanded(allExpanded ? new Set() : new Set(visible.map((x) => x.item_id)))}>
-                {allExpanded ? "Collapse all" : "Expand all"}
-              </button>}
-            </div>)}
-          {saveError && <Notice kind="error">Couldn’t save the items in view: {saveError}</Notice>}
-          {choosing && <ItemPicker items={all} label="Find an item to add or remove" none="" checked={inView} onToggle={toggleView}
-            clear={viewList("variance_view_added").length + viewList("variance_view_removed").length > 0
-              ? ["Reset to counted items", () => saveView({ variance_view_added: [], variance_view_removed: [] })] : null} />}
-          {lines.length === 0 ? <Empty>{!all.length ? "No stock moved and no recipe usage in this period." : shown.length ? "No stock item matches this filter." : "No items in view. Use “Add / remove items” to pick some."}</Empty>
-            : loud.length === 0 ? <p className="text-sm text-muted py-3">Nothing to chase: every item in view matches or is off by less than {n(r.threshold_pct, 0)}%. They’re listed at the bottom of the page.</p>
-            : <>
-              <div aria-hidden className="lg-cols lg-head max-md:hidden"><span>Item</span><span className="text-right">Should be left</span><span className="text-right">Actually left</span><span className="text-right">Difference</span></div>
-              {loud.map(row)}
-            </>}
+
+          <section id="individual" className="panel scroll-mt-4" aria-labelledby="individual-title">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <PanelHead icon="box" id="individual-title" title="Individual stock items"
+                sub={pools.length ? "Stock items never used as recipe alternatives." : "Every stock item in this count period."} />
+              <div className="flex flex-wrap items-center gap-2">
+                <input className={`${inputCls} w-full sm:w-52`} type="search" placeholder="Search items…" aria-label="Search stock items" value={search} onChange={(e) => setSearch(e.target.value)} />
+                <div role="group" aria-label="Filter by difference" className="inline-flex flex-wrap rounded-control border border-line overflow-hidden text-sm">
+                  {FILTERS.map(([k, label]) => (
+                    <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}
+                      className={`px-3 py-1.5 ${filter === k ? "bg-raised text-ink font-medium" : "bg-surface text-muted hover:text-ink"}`}>
+                      {label}{k !== "all" ? <span className="mono text-xs text-faint ml-1">{count(k)}</span> : null}
+                    </button>))}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-2 text-sm">
+              <label className="flex items-center gap-2 text-muted"><input type="checkbox" checked={packs} onChange={(e) => setPacks(e.target.checked)} /> Bottles / kegs instead of L</label>
+              <span className="flex gap-4">
+                {all.length > 0 && <button type="button" className="text-muted hover:text-ink underline" aria-expanded={choosing} onClick={() => setChoosing((v) => !v)}>
+                  {choosing ? "Done" : `Add / remove items (${shown.length} of ${all.length})`}</button>}
+                {visible.length > 0 && <button type="button" className="text-muted hover:text-ink underline"
+                  onClick={() => setExpanded(allExpanded ? new Set() : new Set(visible.map((x) => x.item_id)))}>{allExpanded ? "Collapse all" : "Expand all"}</button>}
+              </span>
+            </div>
+            {saveError && <Notice kind="error">Couldn’t save the items in view: {saveError}</Notice>}
+            {choosing && <ItemPicker items={all} label="Find an item to add or remove" none="" checked={inView} onToggle={toggleView}
+              clear={viewList("variance_view_added").length + viewList("variance_view_removed").length > 0
+                ? ["Reset to counted items", () => saveView({ variance_view_added: [], variance_view_removed: [] })] : null} />}
+            {lines.length === 0 ? <p className="text-sm text-muted py-6 text-center">{!all.length ? "No individual stock item moved or was used in this period." : shown.length ? "No stock item matches this filter." : "No items in view. Use “Add / remove items” to pick some."}</p>
+              : loud.length === 0 ? <p className="text-sm text-muted py-6 text-center">Nothing to chase: every item in view matches or is off by less than {n(r.threshold_pct, 0)}%. <a className="underline" href="#quiet" onClick={() => setQuietPicked(true)}>See them at the bottom of the page</a>.</p>
+              : <>{ledgerHead}{loud.map(row)}</>}
+          </section>
 
           {pools.length > 0 && (
-            <section id="alternatives" className="mt-8 scroll-mt-4">
-              <div className="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
-                <div>
-                  <h2 className="font-semibold">Stock items used as alternatives</h2>
-                  <p className="text-xs text-muted">Stock items that can stand in for one another in one or more recipes. Swype doesn’t say which one was poured, so each set is checked as one.</p>
-                </div>
-                <span className="lg-chip bg-raised text-muted">{pools.length} set{pools.length === 1 ? "" : "s"}</span>
+            <section id="alternatives" className="panel scroll-mt-4" aria-labelledby="alternatives-title">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                <PanelHead icon="shuffle" id="alternatives-title" title="Stock items used as alternatives"
+                  sub="Stock items that can stand in for one another in recipes. Swype doesn’t say which one was poured, so each set is checked as one." />
+                <span className="pill pill-none">{pools.length} set{pools.length === 1 ? "" : "s"}</span>
               </div>
-              <div className="flex flex-col gap-4">{pools.map((p) => <PoolCard key={p.id} p={p} threshold={r.threshold_pct} />)}</div>
+              <div className="flex flex-col gap-5">{pools.map((p) => <PoolCard key={p.id} p={p} threshold={r.threshold_pct} />)}</div>
             </section>)}
 
           {r.unmapped.length > 0 && (
-            <section className="card p-5 mt-6">
-              <h2 className="font-semibold mb-1">Sold with no recipe</h2>
-              <p className="text-xs text-muted mb-3">These Swype items aren’t in recipe usage, so stock items they use will look short. <Link className="underline" to="/recipes?tab=todo">Add recipes</Link> or mark them as taking no stock.</p>
+            <section className="panel" aria-labelledby="unmapped-title">
+              <PanelHead icon="recipe" id="unmapped-title" title="Sold with no recipe"
+                sub={<>These Swype items aren’t in recipe usage, so stock items they use will look short. <Link className="underline" to="/recipes?tab=todo">Add recipes</Link> or mark them as taking no stock.</>} />
               <ul className="text-sm grid gap-x-6 gap-y-0.5 sm:grid-cols-2 lg:grid-cols-3">{r.unmapped.slice(0, 60).map((u) => (
                 <li key={u.code} className="flex justify-between gap-2"><span>{u.name} <span className="text-muted text-xs">{u.category}</span></span><span className="num text-muted">{n(u.sold, 0)}</span></li>))}</ul>
               {r.unmapped.length > 60 && <p className="text-xs text-muted mt-2">and {r.unmapped.length - 60} more</p>}
             </section>)}
 
           {quiet.length > 0 && (
-            <section className="mt-8" aria-label="Items matching or within the threshold">
-              <div aria-hidden className="lg-cols lg-head max-md:hidden"><span>Item</span><span className="text-right">Should be left</span><span className="text-right">Actually left</span><span className="text-right">Difference</span></div>
+            <section className="panel !py-3" aria-label="Items matching or within the threshold">
               <details id="quiet" className="lg-group scroll-mt-4" open={quietOpen} onToggle={(e) => { const o = e.currentTarget.open; if (o !== quietOpen) setQuietPicked(o); }}>
-                <summary>
-                  <span className="lg-arrow inline-block text-lg leading-none transition-transform mr-2" aria-hidden>›</span>
-                  Matching or off by less than {n(r.threshold_pct, 0)}% <span className="mono text-xs text-faint ml-1">{quiet.length}</span>
+                <summary className="flex items-center gap-3 !text-ink">
+                  <span className="lg-arrow inline-block text-lg leading-none transition-transform" aria-hidden>›</span>
+                  <span className="kpi-icon !w-8 !h-8 bg-ok-soft text-ok"><Icon name="check" size={16} /></span>
+                  <span className="font-semibold">Matching or off by less than {n(r.threshold_pct, 0)}%</span>
+                  <span className="pill pill-ok !text-xs">{quiet.length}</span>
                 </summary>
-                {quiet.map(row)}
+                <div className="pt-2">{ledgerHead}{quiet.map(row)}</div>
               </details>
             </section>)}
 
-          <footer className="text-xs text-muted leading-relaxed mt-4 max-w-[75ch]">
+          <footer className="text-xs text-muted leading-relaxed max-w-[75ch]">
             “Actually left” is the closing physical count. “Recipe usage” is estimated from Swype sales × recipes, not measured.
             A difference is not proof of theft, over-pouring or waste. One sale can appear under several stock items; don’t add units sold across sections.
           </footer>
-        </>)}
+        </div>)}
     </Page>
   );
+}
+
+function PanelHead({ icon, id, title, sub }: { icon: IconName; id?: string; title: string; sub?: ReactNode }) {
+  return (
+    <div className="panel-head !mb-0 min-w-0">
+      <span className="panel-icon"><Icon name={icon} size={20} /></span>
+      <div className="min-w-0"><h2 id={id} className="panel-title">{title}</h2>{sub && <p className="panel-sub">{sub}</p>}</div>
+    </div>);
+}
+
+function Kpi({ icon, tone, label, value, valueCls = "", note, onClick }: { icon: IconName; tone: string; label: string; value: number; valueCls?: string; note?: string | null; onClick?: () => void }) {
+  return (
+    <button type="button" className="kpi hover:border-line-strong" onClick={onClick}>
+      <span className={`kpi-icon ${tone}`}><Icon name={icon} size={22} /></span>
+      <span className="min-w-0"><span className="kpi-label block">{label}</span><span className={`kpi-value block ${valueCls}`}>{value}</span>{note && <span className="kpi-note block sm:truncate">{note}</span>}</span>
+    </button>);
 }
 
 /** From and To count pickers. Each lists the loaded counts newest first and ends with "Load 10 earlier counts…".
@@ -366,9 +392,9 @@ function Chart({ lines }: { lines: Line[] }) {
   const swatch = (cls: string, text: string) => <span><b className={`inline-block w-2.5 h-2 mr-1.5 rounded-sm ${cls}`} />{text}</span>;
   const cols = "grid grid-cols-[minmax(0,110px)_1fr_auto] sm:grid-cols-[minmax(0,180px)_1fr_120px] gap-3.5";
   return (
-    <section className="card p-5 mb-5">
+    <section className="panel">
       <div className="flex items-center justify-between gap-2.5 flex-wrap mb-4">
-        <h2 className="font-semibold">{diff ? "Actually left − should be left" : "Stock remaining / available stock"}</h2>
+        <PanelHead icon="chart" title={diff ? "Actually left − should be left" : "Stock remaining / available stock"} sub="Individual items you chose to follow." />
         <div className="flex items-center flex-wrap gap-3.5 text-xs text-muted">
           {diff ? <>{swatch("bg-danger", "Short")}{swatch("bg-accent", "Over")}</> : <>{swatch("lg-e", "Should be left")}{swatch("lg-a", "Actually left")}</>}
           <div role="group" aria-label="Chart style" className="inline-flex rounded-control border border-line overflow-hidden">
@@ -420,8 +446,14 @@ const CHIP: Partial<Record<VarianceRow["status"], [string, string]>> = {
   no_recipe: ["No recipe uses it", "bg-raised text-accent"],
 };
 
+/** Difference as a tinted pill: amber short, blue over, green matching, red past the threshold. */
+function DiffPill({ kind, status, text }: { kind: Kind; status: string; text: string }) {
+  const cls = kind === "not_counted" ? "pill-none" : kind === "matches" ? "pill-ok" : status === "off" ? "pill-off" : kind === "short" ? "pill-short" : "pill-over";
+  const icon: IconName | null = kind === "matches" ? "check" : kind === "short" ? (status === "off" ? "alert" : "warn") : kind === "over" ? "up" : null;
+  return <span className={`pill ${cls}`}>{icon && <Icon name={icon} size={14} strokeWidth={2.25} />}{text}</span>;
+}
+
 function Section({ x, q, open, onToggle, threshold }: { x: Line; q: (v: Num | number, x: VarianceRow, signed?: boolean) => string; open: boolean; onToggle: (open: boolean) => void; threshold: Num }) {
-  const tone = x.kind === "short" ? "text-danger" : x.kind === "over" ? "text-accent" : x.kind === "matches" ? "text-ok" : "text-muted";
   const diffText = x.diff == null ? "n/a" : x.kind === "matches" ? "Matches" : `${q(Math.abs(x.diff), x)} ${x.kind}`;
   const chip = x.status === "off" ? [`Off ≥ ${n(threshold, 0)}%`, "bg-danger-soft text-danger"] : CHIP[x.status];
   const flow = [`Opening ${q(x.opening, x)}`];
@@ -442,9 +474,9 @@ function Section({ x, q, open, onToggle, threshold }: { x: Line; q: (v: Num | nu
         </div>
         <div className="md:text-right num"><span className="md:sr-only block text-xs text-muted">Should be left</span><strong className="font-medium whitespace-nowrap">{q(x.shouldLeft, x)}</strong></div>
         <div className="md:text-right num"><span className="md:sr-only block text-xs text-muted">Actually left</span><strong className="font-medium whitespace-nowrap">{x.left == null ? "Not counted" : q(x.left, x)}</strong></div>
-        <div className={`md:text-right num ${tone}`}><span className="md:sr-only block text-xs text-muted">Difference</span><strong className="font-semibold whitespace-nowrap">{diffText}</strong></div>
+        <div className="md:text-right"><span className="md:sr-only block text-xs text-muted">Difference</span><DiffPill kind={x.kind} status={x.status} text={diffText} /></div>
       </summary>
-      <div className="pl-4 pb-2 overflow-x-auto">
+      <div className="pl-7 pr-3 pb-3 overflow-x-auto">
         {x.no_recipe ? <p className="text-xs text-muted pb-1">No recipe uses {x.name}, so sales can’t explain any of its use. Add it to the recipe of every Swype item that takes it (a bottle of beer too: 1 each).</p>
           : x.contributions.length === 0 ? <p className="text-xs text-muted pb-1">No sold Swype item with a recipe uses {x.name} in this period.</p> : (
           <table className="lg-links" aria-label={`Menu items using ${x.name}`}>
@@ -465,61 +497,71 @@ function Section({ x, q, open, onToggle, threshold }: { x: Line; q: (v: Num | nu
 
 function PoolCard({ p, threshold }: { p: VariancePool; threshold: Num }) {
   const x = derivePool(p);
-  const tone = x.kind === "short" ? "text-danger" : x.kind === "over" ? "text-accent" : x.kind === "matches" ? "text-ok" : "text-muted";
-  const toneBg = x.kind === "short" ? "bg-danger-soft" : "bg-raised";
-  const chip = p.status === "off" ? [`Off ≥ ${n(threshold, 0)}%`, "bg-danger-soft text-danger"] : CHIP[p.status];
+  const offPct = p.status === "off";
+  const status: [string, string, IconName] = x.kind === "not_counted" ? [CHIP[p.status]?.[0] ?? "Not counted", "pill-none", "alert"]
+    : x.kind === "matches" ? ["Matches", "pill-ok", "check"] : p.status === "ok" ? [`Within ±${n(threshold, 0)}%`, "pill-ok", "check"]
+    : x.kind === "short" ? ["Shortage", offPct ? "pill-off" : "pill-short", "warn"] : ["Over", "pill-over", "up"];
   const diffLabel = x.kind === "short" ? "Shortage" : x.kind === "over" ? "Over" : "Difference";
-  const diffText = x.diff == null ? "n/a" : x.kind === "matches" ? "Matches" : qUnit(Math.abs(x.diff), p.unit);
+  const diffText = x.diff == null ? "n/a" : x.kind === "matches" ? "0" : qUnit(Math.abs(x.diff), p.unit);
+  const diffTile = x.kind === "short" ? (offPct ? "bg-danger-soft text-danger" : "bg-amber-soft text-amber") : x.kind === "over" ? "bg-info-soft text-info" : x.kind === "matches" ? "bg-ok-soft text-ok" : "bg-paper-3";
   const shared = p.members.filter((m) => p.recipes.filter((c) => c.uses.includes(m.name)).length > 1).map((m) => m.name);
   const sold = p.recipes.reduce((t, c) => t + Number(c.sold), 0);
-  const tile = (label: string, value: string, cls = "bg-raised", valueCls = "") => (
-    <div className={`rounded-control p-3 ${cls}`}><div className="text-xs text-muted">{label}</div><div className={`text-xl font-semibold num mt-0.5 ${valueCls}`}>{value}</div></div>);
   const flow = [`Opening ${qUnit(p.opening, p.unit)}`];
   if (Number(p.received)) flow.push(`+ in ${qUnit(p.received, p.unit)}`);
   if (Number(p.removed)) flow.push(`− out ${qUnit(p.removed, p.unit)}`);
   flow.push(`− recipe usage ${qUnit(p.expected, p.unit)}`);
   if (Number(p.explained)) flow.push(`− recorded waste ${qUnit(p.explained, p.unit)}`);
   return (
-    <article id={`pool-${p.id}`} className="card p-4 scroll-mt-4">
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold">{p.name}</h3>{chip && <span className={`lg-chip ${chip[1]}`}>{chip[0]}</span>}</div>
-          <p className="text-xs text-muted num mt-0.5">{flow.join(" ")}</p>
-          <div className="grid grid-cols-3 gap-2 mt-3">
-            {tile("Should be left", qUnit(x.shouldLeft, p.unit))}
-            {tile("Actually left", x.left == null ? "Not counted" : qUnit(x.left, p.unit))}
-            {tile(diffLabel, diffText, toneBg, tone)}
+    <article id={`pool-${p.id}`} className="scroll-mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] items-start">
+      <div className="min-w-0 rounded-[12px] border border-line bg-paper p-4">
+        <div className="flex items-start gap-3">
+          <span className="panel-icon !bg-paper-3 !text-ink"><Icon name="glass" size={20} /></span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-semibold leading-tight">{sellingName(p)}</h3>
+            <p className="text-sm text-muted">{p.members.map((m) => m.name).join(", ")}</p>
           </div>
-          <table className="lg-links mt-3" aria-label={`Counts of ${p.name}`}>
+          <span className={`pill ${status[1]}`}><Icon name={status[2]} size={14} strokeWidth={2.25} />{status[0]}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2 mt-4">
+          <div className="figure-tile bg-info-soft"><div>Should be left</div><div>{qUnit(x.shouldLeft, p.unit)}</div></div>
+          <div className="figure-tile bg-info-soft"><div>Actually left</div><div>{x.left == null ? "n/a" : qUnit(x.left, p.unit)}</div></div>
+          <div className={`figure-tile ${diffTile}`}><div className="!text-current opacity-80">{diffLabel}</div><div>{diffText}</div></div>
+        </div>
+        <p className="text-xs text-muted num mt-3">{flow.join(" ")}</p>
+        <details className="mt-2 text-sm">
+          <summary className="cursor-pointer text-muted hover:text-ink select-none text-xs">Counts by stock item</summary>
+          <table className="lg-links mt-1" aria-label={`Counts of ${p.name}`}>
             <thead><tr><th>Stock item</th><th>Opening</th><th>Closing</th><th>Gone</th></tr></thead>
             <tbody>{p.members.map((m) => (
               <tr key={m.item_id}><td>{m.name} <span className="text-muted mono text-xs">{m.sku}</span></td>
-                <td>{m.opening == null ? "—" : qUnit(m.opening, m.stock_unit)}</td><td>{m.closing == null ? "—" : qUnit(m.closing, m.stock_unit)}</td>
-                <td>{m.actual == null ? "—" : qUnit(m.actual, m.stock_unit)}</td></tr>))}
+                <td>{m.opening == null ? "n/a" : qUnit(m.opening, m.stock_unit)}</td><td>{m.closing == null ? "n/a" : qUnit(m.closing, m.stock_unit)}</td>
+                <td>{m.actual == null ? "n/a" : qUnit(m.actual, m.stock_unit)}</td></tr>))}
             </tbody>
           </table>
-        </div>
-        <div className="min-w-0 overflow-x-auto lg:border-l lg:border-line lg:pl-5">
-          <h4 className="text-sm font-semibold mb-1">Participating recipes</h4>
-          {p.recipes.length === 0 ? <p className="text-xs text-muted">Nothing that uses these items sold in this period.</p> : (
-            <table className="lg-links" aria-label={`Recipes using ${p.name}`}>
-              <thead><tr><th>Recipe</th><th>Sold</th><th>Per item</th><th>Usage</th><th>Uses</th></tr></thead>
-              <tbody>{p.recipes.map((c, i) => (
-                <tr key={i}><td>{c.name} <span className="text-muted mono text-xs">{c.code}</span></td><td>{n(c.sold, 0)}</td><td>{n(c.portion_qty, 2)} {c.portion_unit}</td>
-                  <td>{qUnit(c.used, p.unit)}</td>
-                  <td><span className="flex flex-wrap gap-1">{c.uses.map((u) => <span key={u} className="rounded-full bg-accent/10 text-accent text-[11px] px-2 py-px whitespace-nowrap">{u}</span>)}</span></td></tr>))}
-              </tbody>
-              <tfoot>
-                <tr><td>Total (all recipes)</td><td>{n(sold, 0)}</td><td /><td>{qUnit(p.expected, p.unit)}</td><td /></tr>
-                {Number(p.explained) > 0 && <tr><td className="!font-normal text-muted">Recorded breakage / expired</td><td /><td /><td className="!font-normal">{qUnit(p.explained, p.unit)}</td><td /></tr>}
-              </tfoot>
-            </table>)}
-        </div>
+        </details>
       </div>
-      <p className="text-xs text-muted mt-3 border-t border-line pt-2">
-        {p.members.length === 2 ? "Both" : `The ${p.members.length}`} items are calculated together because they can stand in for one another{shared.length ? ` across recipes (${shared.join(", ")} ${shared.length === 1 ? "is" : "are"} used in more than one)` : ""}.
-      </p>
-      {p.issues.map((t) => <p key={t} className="text-xs text-danger pt-1">{t}. Fix the item’s unit on Stock items, or the portion on Recipes.</p>)}
+      <div className="min-w-0 overflow-x-auto lg:border-l lg:border-line lg:pl-5">
+        <h4 className="flex items-center gap-2 font-semibold mb-2"><Icon name="doc" size={18} className="text-muted" />Participating recipes</h4>
+        {p.recipes.length === 0 ? <p className="text-sm text-muted">Nothing that uses these items sold in this period.</p> : (
+          <table className="lg-links boxed" aria-label={`Recipes using ${p.name}`}>
+            <thead><tr><th>Recipe</th><th>Sold</th><th>Per item</th><th>Required usage</th></tr></thead>
+            <tbody>{p.recipes.map((c, i) => (
+              <tr key={i}>
+                <td><span className="flex items-start gap-2"><Icon name="glass" size={16} className="text-accent mt-0.5" /><span className="min-w-0">{c.name}
+                  <span className="flex flex-wrap gap-1 mt-0.5">{c.uses.map((u) => <span key={u} className="rounded-full bg-info-soft text-info text-[11px] px-2 py-px whitespace-nowrap">{u}</span>)}</span></span></span></td>
+                <td>{n(c.sold, 0)}</td><td>{n(c.portion_qty, 2)} {c.portion_unit}</td><td>{qUnit(c.used, p.unit)}</td></tr>))}
+            </tbody>
+            <tfoot>
+              <tr><td>Total (all recipes)</td><td>{n(sold, 0)}</td><td /><td>{qUnit(p.expected, p.unit)}</td></tr>
+              {Number(p.explained) > 0 && <tr><td className="!font-normal text-muted !bg-transparent">Recorded breakage / expired</td><td className="!bg-transparent" /><td className="!bg-transparent" /><td className="!font-normal !bg-transparent">{qUnit(p.explained, p.unit)}</td></tr>}
+            </tfoot>
+          </table>)}
+        <p className="flex items-start gap-2 text-xs text-muted mt-3 rounded-[10px] bg-paper-3 px-3 py-2">
+          <Icon name="alert" size={14} className="mt-px" />
+          <span>{p.members.length === 2 ? "Both" : `The ${p.members.length}`} items are calculated together because they can stand in for one another{shared.length ? ` across recipes (${shared.join(", ")} ${shared.length === 1 ? "is" : "are"} used in more than one)` : ""}.</span>
+        </p>
+        {p.issues.map((t) => <p key={t} className="text-xs text-danger pt-1">{t}. Fix the item’s unit on Stock items, or the portion on Recipes.</p>)}
+      </div>
     </article>);
 }
 

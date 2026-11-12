@@ -84,6 +84,8 @@ table.grid tr.section td { background: transparent; color: var(--color-ink); fon
   .lg-cols { display: grid; gap: var(--space-sm); align-items: center; }
   @media (min-width: 48rem) { .lg-cols { grid-template-columns: minmax(0, 1fr) 8.5rem 8.5rem 9.5rem; } }
   .lg-head { border-bottom: var(--rule-hair) solid var(--color-line-strong); padding-block: var(--space-xs); font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); }
+  .lg-head.band { border-bottom: 0; padding-inline: var(--space-sm); color: var(--color-ink-2); font-weight: 600; }
+  .panel .lg-row > summary { padding-inline: var(--space-sm); border-radius: 8px; }
   .lg-row { border-bottom: var(--rule-hair) solid var(--color-line); }
   .lg-row > summary { list-style: none; cursor: pointer; padding-block: var(--space-sm); }
   .lg-row > summary::-webkit-details-marker { display: none; }
@@ -129,5 +131,59 @@ table.grid tr.section td { background: transparent; color: var(--color-ink); fon
   table.lg-links :is(th, td):first-child { text-align: left; padding-left: 0; white-space: normal; }
   table.lg-links :is(th, td):last-child { padding-right: 0; }
   table.lg-links tfoot td { font-weight: 500; }
+  /* Section panel: a raised sheet with a head (icon badge, title, line of help) and its content. */
+  .panel { background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-line); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel); padding: var(--space-lg); }
+  @media (max-width: 39.99rem) { .panel { padding: var(--space-md); border-radius: var(--radius-card); } }
+  .panel-head { display: flex; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); }
+  .panel-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: var(--color-paper-3); color: var(--color-ink-2); flex-shrink: 0; }
+  .panel-title { font-size: var(--text-lg); font-weight: 650; line-height: 1.2; max-width: none; }
+  .panel-sub { font-size: var(--text-sm); color: var(--color-muted); margin-top: 2px; }
+  /* Stat tile: icon in a tinted circle, label, big figure. */
+  .kpis { display: grid; gap: var(--space-sm); grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr)); }
+  .kpi { display: flex; align-items: center; gap: var(--space-sm); background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-line); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel); padding: var(--space-md); min-width: 0; text-align: left; }
+  .kpi-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 999px; flex-shrink: 0; }
+  .kpi-label { font-size: var(--text-sm); color: var(--color-muted); }
+  .kpi-value { font-size: 1.75rem; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .kpi-note { font-size: var(--text-xs); color: var(--color-faint); }
+  @media (max-width: 39.99rem) {
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xs); }
+    .kpi { flex-direction: column; align-items: flex-start; gap: var(--space-xs); padding: var(--space-sm); border-radius: var(--radius-card); }
+    .kpi-icon { width: 34px; height: 34px; }
+    .kpi-value { font-size: 1.4rem; }
+    .kpi-note { white-space: normal; }
+  }
+  /* Figure tile inside a panel (should be left / actually left / shortage). */
+  .figure-tile { border-radius: 10px; padding: var(--space-sm) var(--space-md); min-width: 0; }
+  .figure-tile > div:first-child { font-size: var(--text-sm); color: var(--color-muted); }
+  .figure-tile > div:last-child { font-size: 1.6rem; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  @media (max-width: 39.99rem) { .figure-tile > div:last-child { font-size: 1.2rem; } }
+  /* Status pill: tinted background, icon and figure. */
+  .pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 10px; font-size: var(--text-sm); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pill-short { background: var(--color-amber-soft); color: var(--color-amber); }
+  .pill-off { background: var(--color-danger-soft); color: var(--color-danger); }
+  .pill-ok { background: var(--color-ok-soft); color: var(--color-ok); }
+  .pill-over { background: var(--color-info-soft); color: var(--color-info); }
+  .pill-none { background: var(--color-paper-3); color: var(--color-muted); }
+  /* Table head band inside a panel. */
+  .band { background: var(--color-paper-3); border-radius: 8px; }
+  table.lg-links.boxed { font-size: var(--text-sm); }
+  table.lg-links.boxed thead th { background: var(--color-paper-3); color: var(--color-ink-2); font-weight: 600; padding-block: var(--space-xs); }
+  table.lg-links.boxed thead th:first-child { border-radius: 8px 0 0 8px; padding-left: var(--space-sm); }
+  table.lg-links.boxed thead th:last-child { border-radius: 0 8px 8px 0; padding-right: var(--space-sm); }
+  table.lg-links.boxed td:first-child { padding-left: var(--space-sm); }
+  table.lg-links.boxed td:last-child { padding-right: var(--space-sm); }
+  table.lg-links.boxed tfoot td { background: var(--color-info-soft); border-top: 0; font-weight: 650; color: var(--color-ink); }
+  table.lg-links.boxed tfoot tr:first-child td:first-child { border-radius: 8px 0 0 8px; }
+  table.lg-links.boxed tfoot tr:first-child td:last-child { border-radius: 0 8px 8px 0; }
+
+  /* Side menu: a navy rail. Tokens are re-scoped inside it so shared pieces (business switcher, theme toggle) fit. */
+  .sidenav { background: var(--color-nav); color: var(--color-nav-ink);
+    --color-ink: var(--color-nav-ink); --color-ink-2: var(--color-nav-ink); --color-muted: var(--color-nav-muted); --color-faint: var(--color-nav-muted);
+    --color-line: var(--color-nav-line); --color-line-strong: var(--color-nav-line); --color-raised: var(--color-nav-hover); --color-surface: var(--color-nav);
+    --color-paper-2: var(--color-nav); --color-paper: var(--color-nav); }
+  .navlink { display: flex; align-items: center; gap: var(--space-sm); padding: 9px 12px; border-radius: 10px; font-size: var(--text-sm); color: var(--color-nav-muted); }
+  .navlink:hover { background: var(--color-nav-hover); color: var(--color-nav-ink); }
+  .navlink[aria-current="page"] { background: var(--color-nav-active); color: var(--color-nav-ink); font-weight: 600; }
+
   .lg-chip { display: inline-block; font-size: var(--text-xs); border-radius: var(--radius-chip); padding: 0 var(--space-xs); white-space: nowrap; font-weight: 500; }
 }

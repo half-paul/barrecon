@@ -6,6 +6,7 @@ import { MeContext, PAGE_AREA, can, useMe } from "./lib/auth";
 import { type CountBar, CountBarContext } from "./lib/countbar";
 import { type Command, CommandPalette, SearchIcon, shortcutLabel } from "./lib/palette";
 import { Button, inputCls } from "./lib/ui";
+import { Icon, type IconName } from "./lib/icons";
 import Login from "./pages/Login";
 import SetPassword from "./pages/SetPassword";
 import Home from "./pages/Home";
@@ -34,34 +35,39 @@ const weekly = [["/", "Overview"], ["/counts", "Counts"], ["/deliveries", "Deliv
 const setup = [["/items", "Stock items"], ["/items/groups", "Item groups"], ["/swype-items", "Swype items"], ["/recipes", "Recipes"], ["/imports", "Imports"], ["/settings", "Settings"],
   ["/businesses", "Businesses"], ["/users", "Users"], ["/audit", "Audit log"]] as const;
 const nav = [...weekly, ...setup];
+const ICONS: Record<string, IconName> = { "/": "home", "/counts": "counts", "/deliveries": "truck", "/sales": "sales", "/variance": "scale",
+  "/items": "box", "/items/groups": "layers", "/swype-items": "tag", "/recipes": "recipe", "/imports": "upload", "/settings": "settings",
+  "/businesses": "building", "/users": "users", "/audit": "history" };
 /** Only the pages this login may open. */
 const useAllowed = <T extends readonly [string, string]>(links: readonly T[]) => { const me = useMe(); return links.filter(([to]) => can(me, PAGE_AREA[to] ?? null)); };
 
-function SetupMenu() {
-  const items = useAllowed(setup);
-  const [open, setOpen] = useState(false);
-  const loc = useLocation();
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => setOpen(false), [loc.pathname]);
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", away); document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
-  }, [open]);
-  if (!items.length) return null;
-  const here = items.some(([to]) => loc.pathname === to || loc.pathname.startsWith(`${to}/`));
+/** Desktop: every page in a navy rail on the left, the weekly loop first, then setup. */
+function SideNav({ onLogout, onSearch, onCount }: { onLogout: () => void; onSearch: () => void; onCount: (() => void) | null }) {
+  const me = useMe();
+  const week = useAllowed(weekly), items = useAllowed(setup);
+  const link = (to: string, label: string) => (
+    <NavLink key={to} to={to} end={to === "/" || to === "/items"} className="navlink"><Icon name={ICONS[to] ?? "box"} />{label}</NavLink>);
   return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}
-        className={`px-3 py-1.5 rounded-control text-sm ${here ? "bg-raised text-ink font-medium" : "text-muted hover:text-ink"}`}>Setup ▾</button>
-      {open && (
-        <div role="menu" className="absolute z-50 mt-1 min-w-48 rounded-control border border-line bg-surface shadow-lg p-1">
-          {items.map(([to, label]) => (
-            <NavLink key={to} to={to} end role="menuitem" className={({ isActive }) => `block px-3 py-2 rounded-control text-sm ${isActive ? "bg-raised text-ink font-medium" : "text-muted hover:text-ink hover:bg-raised"}`}>{label}</NavLink>))}
-        </div>)}
-    </div>
+    <aside className="sidenav hidden md:flex flex-col w-60 shrink-0 sticky top-0 h-screen overflow-y-auto">
+      <div className="px-4 pt-5 pb-4"><BusinessSwitcher /></div>
+      {onCount && <button type="button" onClick={onCount} className="ctl mx-3 mb-2 h-9 rounded-[10px] bg-accent text-accent-ink font-semibold text-sm hover:bg-accent-deep">Start count</button>}
+      <button type="button" onClick={onSearch} className="mx-3 mb-3 flex items-center gap-2 h-9 rounded-[10px] border border-line px-3 text-sm text-muted hover:text-ink hover:bg-raised">
+        <Icon name="search" size={16} /><span className="flex-1 text-left">Search</span><kbd className="mono text-[11px] border border-line rounded px-1">{shortcutLabel}</kbd>
+      </button>
+      <nav aria-label="Main" className="flex flex-col gap-0.5 px-3">
+        {week.map(([to, label]) => link(to, label))}
+        {items.length > 0 && <>
+          <div className="border-t border-line my-3" />
+          <div className="px-3 pb-1 text-xs text-muted">Setup</div>
+          {items.map(([to, label]) => link(to, label))}
+        </>}
+      </nav>
+      <div className="mt-auto px-3 py-4 border-t border-line flex items-center gap-1">
+        <NavLink to="/account" title="My account" className="navlink flex-1 min-w-0 !px-2"><Icon name="user" size={16} /><span className="truncate">{me?.display_name}{me?.session_mode === "pin" ? " · PIN" : ""}</span></NavLink>
+        <ThemeToggle />
+        <button onClick={onLogout} title="Switch user: log out so someone else can log in" aria-label="Switch user" className="p-2 rounded-control text-muted hover:text-ink hover:bg-raised"><Icon name="logout" size={16} /></button>
+      </div>
+    </aside>
   );
 }
 
@@ -197,33 +203,19 @@ export default function App() {
   return (
     <MeContext.Provider value={user}>
     <CountBarContext.Provider value={setCountBar}>
-    <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-40 bg-paper border-b border-line">
-        <div className="max-w-[1280px] mx-auto px-4 sm:px-7 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-          {/* the business this page belongs to: its logo and name; two count buttons need the room on a phone */}
-          <BusinessSwitcher compact={!!countBar} />
-          <nav aria-label="Main" className="hidden md:flex flex-wrap gap-1">
-            {weekly.filter(([to]) => can(user, PAGE_AREA[to] ?? null)).map(([to, label]) => (
-              <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => `px-3 py-1.5 rounded-control text-sm ${isActive ? "bg-raised text-ink font-medium" : "text-muted hover:text-ink"}`}>{label}</NavLink>
-            ))}
-            <span aria-hidden className="w-px self-stretch bg-line mx-1" />
-            <SetupMenu />
-          </nav>
+    <div className="min-h-screen md:flex">
+      <SideNav onLogout={logout} onSearch={() => setPalette(true)} onCount={canCount && !countBar ? startCountSafe : null} />
+      <div className="flex-1 min-w-0 flex flex-col">
+      {/* phones: business and menu; every width: the count actions, kept in view */}
+      <header className={`sticky top-0 z-40 bg-paper/90 backdrop-blur border-b border-line ${countBar ? "" : "md:hidden"}`}>
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-7 py-3 flex items-center gap-x-3">
+          <span className="md:hidden min-w-0"><BusinessSwitcher compact={!!countBar} /></span>
           <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={() => setPalette(true)} className="hidden 2xl:flex items-center gap-2 h-9 border border-line-strong rounded-control px-3 min-w-56 text-muted hover:border-muted">
-              <SearchIcon /><span className="flex-1 text-left text-sm">Search the portal…</span>
-              <kbd className="mono text-xs border border-line rounded px-1.5">{shortcutLabel}</kbd>
-            </button>
-            <button onClick={() => setPalette(true)} aria-label="Search" title={`Search the portal (${shortcutLabel})`} className="2xl:hidden p-2.5 rounded-control border border-line"><SearchIcon /></button>
+            <button onClick={() => setPalette(true)} aria-label="Search" title={`Search the portal (${shortcutLabel})`} className="md:hidden p-2.5 rounded-control border border-line"><SearchIcon /></button>
             {countBar ? <>
               <Button onClick={countBar.post} disabled={countBar.busy}>Post count</Button>
               <Button kind="quiet" onClick={countBar.cancel} disabled={countBar.busy}>Cancel</Button>
-            </> : canCount && <button type="button" onClick={startCountSafe} className="ctl h-9 bg-accent text-accent-ink rounded-control px-4 font-semibold text-sm whitespace-nowrap hover:bg-accent-deep">Start count</button>}
-            <span className="hidden md:contents">
-              <ThemeToggle />
-              <NavLink to="/account" title="My account" className="text-xs text-muted hover:text-ink px-1 max-w-32 truncate">{user.display_name}{user.session_mode === "pin" ? " · PIN" : ""}</NavLink>
-              <button onClick={logout} title="Log out so someone else can log in" className="text-xs text-faint hover:text-ink px-1">Switch user</button>
-            </span>
+            </> : canCount && <button type="button" onClick={startCountSafe} className="md:hidden ctl h-9 bg-accent text-accent-ink rounded-control px-4 font-semibold text-sm whitespace-nowrap hover:bg-accent-deep">Start count</button>}
             <MobileMenu onLogout={logout} />
           </div>
         </div>
@@ -254,6 +246,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
+      </div>
       {asking && <StartCountDialog onStart={createCount} onCancel={() => setAsking(false)} />}
       <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} />
     </div>

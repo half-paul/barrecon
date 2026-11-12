@@ -4,7 +4,7 @@ The locked system. Every Hallmark run reads this first and all screens share it.
 
 ## System
 - Genre: modern-minimal
-- Shape: app screen, kept top bar
+- Shape: app screen, navy side menu on the left (phones: top bar with a menu button)
 - Theme: brand (Night Shift dark by default, Day Shift light from the header toggle)
 - Axes: dark/grotesk-sans/warm, posture Restrained
 
@@ -14,7 +14,9 @@ The locked system. Every Hallmark run reads this first and all screens share it.
 - Ink `--color-ink`, secondary text `--color-muted`, least important text `--color-faint`
 - Rules `--color-line`, stronger rules `--color-line-strong`, field edges `--color-edge`
 - Accent `--color-accent` with `--color-accent-ink` on it; state colours `ok`, `danger`, `info`
-- Radii: `rounded-card` 8px, `rounded-control` 6px, `rounded-chip` 4px
+- Radii: `rounded-panel` 14px, `rounded-card` 8px, `rounded-control` 6px, `rounded-chip` 4px
+- Side menu `--color-nav*`: a deep navy rail in both themes; `.sidenav` re-scopes ink, muted, line and raised so shared pieces fit on it
+- `info` / `info-soft` for over and for expected figures
 
 ## Type
 - Hanken Grotesk for everything people read
@@ -22,15 +24,17 @@ The locked system. Every Hallmark run reads this first and all screens share it.
 - Labels, table heads and group names: sentence case, untracked, never capitals
 
 ## Surfaces
-- Tables sit on the page with hairlines only. Never put one in a card.
-- `.card` is the one container: a tinted well with no border, used for forms and side panels.
-- Sibling figures sit in `.stats`, parted by hairlines.
-- Never a card inside a card.
+- `.panel` is the report section: a raised sheet (hairline, soft shadow, 14px radius) opened by `.panel-head` (icon badge, title, one line of help). Tables and the ledger may sit in one; their head row is a shaded `.band`.
+- `.card` stays the plain container for forms and side panels: a tinted well with no border.
+- Report headline figures sit in `.kpis` tiles (`.kpi`: icon in a tinted circle, label, big figure, note). Other pages may keep `.stats`, parted by hairlines.
+- A state is a `.pill` (`pill-short` amber, `pill-off` red, `pill-ok` green, `pill-over` blue, `pill-none`) with an icon, never colour alone.
+- One level of nesting at most: a bordered well inside a panel, nothing inside that.
 
 ## Signature
 - The weekly loop on Overview (`.loop`): five steps on one rule, the rule's colour is the step's state.
 - The variance ledger (`.lg-cols`, `.lg-row`): one ruled row per item, figures in shared columns.
 - The bottle mark, the one drawn object in the app.
+- Line icons from `lib/icons.tsx` (24px grid, 1.75 stroke) mark menu entries, panel heads and tiles; never decoration alone.
 
 ## Controls
 - 36px tall (`h-9`), 44px on touch through `.ctl`

@@ -13,7 +13,7 @@ type Point = { key: string; name: string; sub: string | null; members: string[] 
   sold: number; should: string; actual: string; pick: () => void; match: (needle: string) => boolean };
 type Dot = { x: Point; sold: number; y: number; kind: Kind; clamped: boolean };
 
-const COLOR: Record<Kind, string> = { within: "var(--color-ok)", over: "var(--color-accent)", short: "var(--color-danger)" };
+const COLOR: Record<Kind, string> = { within: "var(--color-ok)", over: "var(--color-info)", short: "var(--color-danger)" };
 const M = { l: 46, r: 14, t: 14, b: 34 };
 
 function niceStep(span: number, target: number) {
@@ -25,7 +25,7 @@ const money = (v: number) => `${v < 0 ? "−" : "+"}$${n(Math.abs(v), 2)}`;
 
 /** The Swype items that pour from a set ("Mystery Wine / Wine Special"): the ones whose recipe offers the choice,
  *  else any that sold from it, else the stock items when nothing sold. */
-function sellingName(p: VariancePool) {
+export function sellingName(p: VariancePool) {
   const pick = (cs: VariancePool["recipes"]) => [...new Set(cs.map((c) => c.name))];
   const names = pick(p.recipes.filter((c) => c.uses.length > 1));
   const all = names.length ? names : pick(p.recipes);
@@ -88,8 +88,8 @@ export default function VarianceScatter({ rows, pools = [], threshold, needle, q
   const order = [...dots].sort((a, b) => (a.kind === "within" ? 0 : 1) - (b.kind === "within" ? 0 : 1) || a.sold - b.sold);
 
   if (dots.length === 0) return (
-    <section className="card p-5 mb-5">
-      <h2 className="font-semibold">Sales vs stock difference</h2>
+    <section className="panel">
+      <h2 className="panel-title">Sales vs stock difference</h2>
       <p className="text-xs text-muted mt-2">No item can be plotted for this period: each needs both counts, a recipe and some sales that use it.</p>
     </section>);
 
@@ -113,10 +113,10 @@ export default function VarianceScatter({ rows, pools = [], threshold, needle, q
   })();
 
   return (
-    <section className="card p-5 mb-5" aria-labelledby="sc-title">
+    <section className="panel" aria-labelledby="sc-title">
       <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
         <div>
-          <h2 id="sc-title" className="font-semibold">Sales vs stock difference</h2>
+          <h2 id="sc-title" className="panel-title">Sales vs stock difference</h2>
           <p className="text-xs text-muted mt-0.5">Each dot is one stock item in this count period{pools.length ? ", each diamond a Swype item poured from alternative stock items, checked together" : ""}. Hover for details, click to open it below.</p>
         </div>
         <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2">
