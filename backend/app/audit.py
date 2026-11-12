@@ -403,6 +403,7 @@ LABELS: dict[tuple[str, str], str] = {
     ("POST", "/api/platform/tenants/{tenant_id}/suspend"): "Suspended tenant",
     ("POST", "/api/platform/tenants/{tenant_id}/reactivate"): "Reactivated tenant",
     ("POST", "/api/platform/tenants/{tenant_id}/admins"): "Added tenant admin",
+    ("PATCH", "/api/platform/businesses/{business_id}"): "Changed business features",
     ("PUT", "/api/platform/settings"): "Changed platform settings",
     ("POST", "/api/platform/admins"): "Added platform admin",
     ("POST", "/api/platform/admins/{user_id}/active"): "Switched platform admin on or off",

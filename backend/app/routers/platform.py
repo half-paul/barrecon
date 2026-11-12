@@ -23,7 +23,7 @@ from ..db import get_db
 from ..models import (AiUsage, AuditChange, AuditEvent, BusinessLogo, BusinessMember, CountSession, Delivery, DeliveryReceipt, ImportBatch,
                       InventoryItem, Location, Recipe, RecipePhoto, Tenant, User, utcnow)
 from ..schemas import EMAIL
-from ..services import mail, settings_svc, usage
+from ..services import mail, recipe_match, settings_svc, usage
 from .users import _send_invite, event_filters, events_out
 
 router = APIRouter(prefix="/api/platform", tags=["platform"], dependencies=[auth.Platform])
@@ -61,6 +61,11 @@ class TenantPatch(BaseModel):
     max_businesses: int | None = Field(default=None, ge=0)
     max_users: int | None = Field(default=None, ge=0)
     monthly_token_cap: int | None = Field(default=None, ge=0)
+
+
+class BusinessFeatures(BaseModel):
+    """What a business is switched on for. Only the platform console sets these."""
+    track_food: bool | None = None
 
 
 class PlatformSettingsIn(BaseModel):
@@ -282,7 +287,7 @@ def tenant_detail(tenant_id: str, db: Session = Depends(get_db)):
     counts = dict(db.query(CountSession.location_id, func.count()).join(Location, Location.id == CountSession.location_id)
                   .filter(Location.tenant_id == t.id, CountSession.status == "posted").group_by(CountSession.location_id).all())
     businesses = [{"id": b.id, "name": b.name, "kind": b.kind, "city": b.city, "is_active": b.is_active, "has_logo": bool(b.logo_at),
-                   "swype": bool(b.swype_email), "members": members.get(b.id, 0), "items": items.get(b.id, 0),
+                   "track_food": bool(b.track_food), "swype": bool(b.swype_email), "members": members.get(b.id, 0), "items": items.get(b.id, 0),
                    "counts_posted": counts.get(b.id, 0), "receipts_read": use.get(b.id, (0, 0, 0.0))[0],
                    "tokens": use.get(b.id, (0, 0, 0.0))[1], "cost_usd": round(use.get(b.id, (0, 0, 0.0))[2], 4),
                    "storage_bytes": storage.get(b.id, 0), "last_activity": last.get(b.id), "created_at": b.created_at}
@@ -347,6 +352,23 @@ def add_admin(tenant_id: str, body: AdminIn, db: Session = Depends(get_db)):
     u = _new_admin(db, t, body)
     db.commit()
     return {"id": u.id, "username": u.username, "invite_sent": None if body.password else _send_invite(db, u)}
+
+
+@router.patch("/businesses/{business_id}")
+def update_business(business_id: str, body: BusinessFeatures, db: Session = Depends(get_db)):
+    """Switch a feature of one business on or off. Food tracking on: the food it sold stops being marked as taking
+    no stock, and the food already marked that way without anyone asking goes back to the Recipes queue to be
+    linked to stock. Off: recipes made for food stay; food with none takes no stock again from the next sales import."""
+    b = db.get(Location, business_id)
+    if not b:
+        raise HTTPException(404, "business not found")
+    released = 0
+    if body.track_food is not None and body.track_food != bool(b.track_food):
+        b.track_food = body.track_food
+        if body.track_food:
+            released = recipe_match.release_food(db, b.id)
+    db.commit()
+    return {"id": b.id, "name": b.name, "track_food": bool(b.track_food), "food_released": released}
 
 
 # ---- usage and reports --------------------------------------------------------------------------------------

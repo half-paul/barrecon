@@ -18,6 +18,8 @@ def test_same_dimension_and_identity():
     assert convert(Decimal("1.5"), "l", "ml") == 1500
     assert convert(Decimal(5), "ml", "ml") == 5
     assert convert(Decimal(2), "kg", "g") == 2000
+    assert convert(Decimal(2), "lb", "g") == Decimal("907.18474")
+    assert abs(convert(Decimal(1), "kg", "lb") - Decimal("2.20462")) < Decimal("0.00001")
 
 
 def test_cross_dimension_requires_yield():

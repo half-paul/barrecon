@@ -157,7 +157,9 @@ export const datasetName = (k: string) => DATASETS[k] ?? k;
 export type Level = "view" | "edit";
 /** A business of the tenant (a bar, a restaurant). logo_at is null without a logo, and changes when the logo does. */
 export type Business = { id: string; name: string; kind: string | null; address: string | null; city: string | null; phone: string | null;
-  email: string | null; website: string | null; is_active: boolean; logo_at: string | null };
+  email: string | null; website: string | null; is_active: boolean; logo_at: string | null;
+  /** food sold is linked to stock by recipes, like drinks; switched on in the platform console */
+  track_food?: boolean };
 export type BusinessAdmin = Business & { swype_email: string | null; swype_company: string | null; swype_store_id: number | null;
   swype_password_set: boolean; members: number; created_at: string | null; copied?: { items: number; groups: number; recipes: number } | null };
 export type Member = { user_id: string; username: string; display_name: string; is_admin: boolean; is_active: boolean; member: boolean; permissions: Record<string, Level> };

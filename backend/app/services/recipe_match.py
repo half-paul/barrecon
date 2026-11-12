@@ -12,7 +12,9 @@ left. A core is looked up in this order:
 
 A cocktail with the same core as one that has a recipe ("Shaft", "Happy Shaft") gets a copy of it to check.
 
-Food and coffee take no stock, so they get no-stock recipes without asking (apply_no_stock).
+Food and coffee take no stock, so they get no-stock recipes without asking (apply_no_stock). A business with
+Location.track_food on (set in the platform console) tracks food like drinks: its food waits in the queue for a
+recipe, matched by name against the stock groups that aren't drinks, and the portion is always left to a person.
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import InventoryItem
+from ..models import InventoryItem, Location, Recipe
 from ..units import BASE_UNITS
 from . import recipes as rec
 from . import swype_items
@@ -37,6 +39,7 @@ NO_STOCK_NOTE = "Takes no stock (food and coffee)"
 WINE = {"Wine", "Boxed wine"}
 SPIRITS = {"Spirits", "Scotch & whisky"}
 BEER = {"Draft beer", "Bottled beer"}
+DRINK_GROUPS = WINE | SPIRITS | BEER | {"Pop"}  # food is never matched to these
 CATEGORY_GROUPS = {
     "draft beer": {"Draft beer"}, "bottled beer": {"Bottled beer"}, "pop": {"Pop", "Bottled beer"},  # the 0% beers ring as pop
     "red wine": WINE, "white wine": WINE, "rose & bubbles": WINE,
@@ -88,12 +91,24 @@ def score(words: list[str], item_words: list[str]) -> float:
     return s
 
 
-def is_no_stock(row: dict) -> bool:
-    return row.get("department") == "Food" or (row.get("category") or "").lower() == "coffee"
+def is_food(row: dict) -> bool:
+    return row.get("department") == "Food"
 
 
-def portion(name: str, item: InventoryItem) -> tuple[Decimal | None, str, str | None]:
-    """(qty, unit, what to check) for one sold. qty None means the name doesn't give the size."""
+def is_no_stock(row: dict, track_food: bool = False) -> bool:
+    return (is_food(row) and not track_food) or (row.get("category") or "").lower() == "coffee"
+
+
+def tracks_food(db: Session, location_id: str) -> bool:
+    b = db.get(Location, location_id)
+    return bool(b and b.track_food)
+
+
+def portion(name: str, item: InventoryItem, food: bool = False) -> tuple[Decimal | None, str, str | None]:
+    """(qty, unit, what to check) for one sold. qty None means the name doesn't give the size; a dish never does."""
+    if food:
+        dim = BASE_UNITS.get(item.stock_unit, ("",))[0]
+        return None, {"mass": "g", "volume": "ml"}.get(dim, item.stock_unit), "portion size"
     if item.stock_unit == "each" or BOTTLE_RE.search(name):
         return Decimal(item.pack_size), item.stock_unit, None
     if BASE_UNITS.get(item.stock_unit, ("",))[0] != "volume":
@@ -133,19 +148,21 @@ def _learned(recipes: dict) -> tuple[dict[str, InventoryItem], dict[str, list]]:
     return {k: items[k] for k, ids in single.items() if len(ids) == 1}, copies
 
 
-def _guess(row: dict, stock: list[InventoryItem], bases: dict, learned: dict) -> tuple[list[InventoryItem], str | None, bool]:
-    """(candidates, how, clear). Clear: one item, found with nothing left over."""
+def _guess(row: dict, stock: list[InventoryItem], bases: dict, learned: dict, food: bool = False) -> tuple[list[InventoryItem], str | None, bool]:
+    """(candidates, how, clear). Clear: one item, found with nothing left over. `food`: a dish of a business that
+    tracks food, whose candidates are every stock group that isn't a drink."""
     groups = CATEGORY_GROUPS.get((row.get("category") or "").lower())
+    fits = (lambda i: i.category in groups) if groups is not None else (lambda i: i.category not in DRINK_GROUPS)
     words = core(row["name"])
     key = " ".join(words)
     base = base_code(row["code"])
     if base != row["code"] and base in bases:
         return [bases[base]], "bottle_recipe", True
-    if groups is None:
+    if groups is None and not food:
         return [], None, False
-    if key in learned and learned[key].category in groups:
+    if key in learned and fits(learned[key]):
         return [learned[key]], "approved", True
-    cand = [i for i in stock if i.category in groups]
+    cand = [i for i in stock if fits(i)]
     if key in HOUSE:
         hit = [i for i in cand if swype_items.norm(i.name) == swype_items.norm(HOUSE[key])]
         if hit:
@@ -167,13 +184,15 @@ def queue(db: Session, location_id: str) -> dict:
     bases = rec.base_recipe_items(recipes)
     learned, copies = _learned(recipes)
     renamed = swype_items.custom_names(db)
+    track_food = tracks_food(db, location_id)
     rows, no_stock = [], 0
     for r in sorted(rec.sold_codes(db, location_id), key=lambda r: -r["sold"]):
         if r["code"] in recipes:
             continue
-        if is_no_stock(r):
+        if is_no_stock(r, track_food):
             no_stock += 1
             continue
+        food = is_food(r)
         out = {"code": r["code"], "name": renamed.get(r["code"], r["name"]), "category": r["category"],
                "sold": r["sold"], "lines": [], "candidates": [], "how": None, "check": None, "clear": False}
         rows.append(out)
@@ -183,10 +202,10 @@ def queue(db: Session, location_id: str) -> dict:
                        lines=[{**_item_out(ln.item), "item_ids": ln.item_ids, "options": [_item_out(it) for it in ln.items[1:]],
                               "qty": ln.qty, "unit": ln.unit} for ln in lines])
             continue
-        cand, how, clear = _guess(r, stock, bases, learned)
+        cand, how, clear = _guess(r, stock, bases, learned, food)
         if not cand:
             continue
-        qty, unit, check = portion(r["name"], cand[0])
+        qty, unit, check = portion(r["name"], cand[0], food)
         check = check or (None if clear else "check the item")
         out.update(how=how, check=check, clear=clear and qty is not None and check is None,
                    candidates=[_item_out(i) for i in cand],
@@ -207,11 +226,28 @@ def approve(db: Session, rows: list[dict]) -> int:
 
 
 def apply_no_stock(db: Session, location_id: str) -> int:
-    """Give every sold food and coffee item a no-stock recipe. Flushes, does not commit. Returns how many."""
+    """Give every sold food and coffee item a no-stock recipe (coffee only, where food is tracked). Flushes, does
+    not commit. Returns how many."""
     have = rec.load_all(db)
+    track_food = tracks_food(db, location_id)
     n = 0
     for r in rec.sold_codes(db, location_id):
-        if r["code"] not in have and is_no_stock(r):
+        if r["code"] not in have and is_no_stock(r, track_food):
             rec.save(db, r["code"], name=r["name"], lines=[], ignored=True, notes=NO_STOCK_NOTE)
             n += 1
     return n
+
+
+def release_food(db: Session, location_id: str) -> int:
+    """Food tracking was switched on: remove the no-stock recipes apply_no_stock gave this business's food, so the
+    food comes back to the queue. A dish someone marked as taking no stock by hand keeps that. Called from the
+    platform console, whose session is in no business, so every query names the business. Flushes, does not commit."""
+    codes = [r["code"] for r in rec.sold_codes(db, location_id) if is_food(r)]
+    if not codes:
+        return 0
+    gone = db.scalars(select(Recipe).where(Recipe.location_id == location_id, Recipe.swype_code.in_(codes),
+                                           Recipe.ignored.is_(True), Recipe.notes == NO_STOCK_NOTE)).all()
+    for r in gone:
+        db.delete(r)
+    db.flush()
+    return len(gone)

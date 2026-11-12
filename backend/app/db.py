@@ -41,6 +41,7 @@ ADDED_COLUMNS = {
     "locations": {"tenant_id": "VARCHAR(36) REFERENCES tenants(id)", "kind": "VARCHAR(32)", "address": "VARCHAR(300)",
                   "city": "VARCHAR(120)", "phone": "VARCHAR(40)", "email": "VARCHAR(254)", "website": "VARCHAR(200)",
                   "is_active": "BOOLEAN NOT NULL DEFAULT TRUE", "logo_at": "TIMESTAMP WITH TIME ZONE",
+                  "track_food": "BOOLEAN NOT NULL DEFAULT FALSE",
                   "swype_email": "VARCHAR(254)", "swype_password": "TEXT", "swype_company": "VARCHAR(64)",
                   "swype_store_id": "INTEGER", "created_at": "TIMESTAMP WITH TIME ZONE"},
     "data_issues": {"tenant_id": "VARCHAR(36)", "location_id": "VARCHAR(36)"},
