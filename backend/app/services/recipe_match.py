@@ -125,7 +125,7 @@ def _learned(recipes: dict) -> tuple[dict[str, InventoryItem], dict[str, list]]:
         if r.ignored or v is None:
             continue
         key = " ".join(core(r.name))
-        if len(v.lines) == 1:
+        if len(v.lines) == 1 and not v.lines[0].options:
             single.setdefault(key, set()).add(v.lines[0].item_id)
             items[key] = v.lines[0].item
         elif v.lines:
@@ -180,7 +180,8 @@ def queue(db: Session, location_id: str) -> dict:
         lines = copies.get(" ".join(core(r["name"])))
         if lines is not None:
             out.update(how="copy", check="copied from a drink of the same name; check the portions",
-                       lines=[{**_item_out(ln.item), "qty": ln.qty, "unit": ln.unit} for ln in lines])
+                       lines=[{**_item_out(ln.item), "item_ids": ln.item_ids, "options": [_item_out(it) for it in ln.items[1:]],
+                              "qty": ln.qty, "unit": ln.unit} for ln in lines])
             continue
         cand, how, clear = _guess(r, stock, bases, learned)
         if not cand:

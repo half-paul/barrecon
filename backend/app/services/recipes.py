@@ -6,7 +6,8 @@ report runs. Saving either corrects the version in effect (effective_from=None) 
 from a date, so a recipe change does not rewrite past weeks.
 
 A recipe is the only link between a Swype item and inventory: Swype items are never inventory items, and
-one Swype item can take several inventory items (a cocktail) or one (a pour, a bottle of beer).
+one Swype item can take several inventory items (a cocktail) or one (a pour, a bottle of beer). A line can
+also name several items the portion may come out of ("Mystery Wine": 6 oz of Box A or Box B or Box C).
 
 Pours follow a naming pattern in Swype, so suggest_pours can draft their recipes: SNG/Single -> one
 single pour of the bottle it most likely pours from (swype_items.suggest_item), DBL/Double -> a double, "6oz" -> 6 oz, Btl -> one whole bottle, and the
@@ -21,7 +22,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import InventoryItem, Recipe, RecipeLine, RecipePhoto, RecipeVersion, SwypeItemSales, SwypeMenuItem, Unit
+from ..models import InventoryItem, Recipe, RecipeLine, RecipeLineOption, RecipePhoto, RecipeVersion, SwypeItemSales, SwypeMenuItem, Unit
 from ..units import BASE_UNITS, ConversionError, convert
 from . import settings_svc
 from . import swype_items
@@ -59,19 +60,25 @@ def to_stock_unit(line_qty: Decimal, unit: str, item: InventoryItem, oz_ml: Deci
                    yield_to_unit=item.yield_to_unit, yield_qty=item.yield_qty)
 
 
-def line_out(line: RecipeLine, oz_ml: Decimal) -> dict:
-    it = line.item
-    out = {"item_id": it.id, "sku": it.sku, "item_name": it.name, "qty": line.qty, "unit": line.unit,
-           "stock_unit": it.stock_unit, "pack_name": it.pack_name, "pack_size": it.pack_size,
-           "stock_qty": None, "packs": None, "error": None}
+def item_portion(it: InventoryItem, qty: Decimal, unit: str, oz_ml: Decimal) -> dict:
+    out = {"item_id": it.id, "sku": it.sku, "item_name": it.name, "stock_unit": it.stock_unit,
+           "pack_name": it.pack_name, "pack_size": it.pack_size, "stock_qty": None, "packs": None, "error": None}
     try:
-        q = to_stock_unit(line.qty, line.unit, it, oz_ml)
+        q = to_stock_unit(qty, unit, it, oz_ml)
         out["stock_qty"] = q
         out["packs"] = q / Decimal(it.pack_size) if it.pack_size else None
     except ConversionError:
-        out["error"] = (f"{it.name} is counted in '{it.stock_unit}', so {line.unit} can't be converted; "
+        out["error"] = (f"{it.name} is counted in '{it.stock_unit}', so {unit} can't be converted; "
                         f"change the item's 'Counted in' unit or enter the portion in {it.stock_unit}")
     return out
+
+
+def line_out(line: RecipeLine, oz_ml: Decimal) -> dict:
+    """The first item's fields at the top level (one-item lines read as before), and every item, first one
+    included, in `items`. A line with more than one item is poured from any one of them."""
+    items = [item_portion(it, line.qty, line.unit, oz_ml) for it in line.items]
+    errors = [x["error"] for x in items if x["error"]]
+    return {**items[0], "qty": line.qty, "unit": line.unit, "items": items, "error": errors[0] if errors else None}
 
 
 def recipe_out(r: Recipe, oz_ml: Decimal) -> dict:
@@ -83,36 +90,47 @@ def recipe_out(r: Recipe, oz_ml: Decimal) -> dict:
             "versions": [{"effective_from": x.effective_from, "lines": len(x.lines)} for x in r.versions]}
 
 
+def _with_lines():
+    lines = selectinload(Recipe.versions).selectinload(RecipeVersion.lines)
+    return lines.selectinload(RecipeLine.item), lines.selectinload(RecipeLine.options).joinedload(RecipeLineOption.item)
+
+
 def load(db: Session, code: str) -> Recipe | None:
-    return db.scalar(select(Recipe).where(Recipe.swype_code == code)
-                     .options(selectinload(Recipe.versions).selectinload(RecipeVersion.lines).selectinload(RecipeLine.item)))
+    return db.scalar(select(Recipe).where(Recipe.swype_code == code).options(*_with_lines()))
 
 
 def load_all(db: Session) -> dict[str, Recipe]:
-    rs = db.scalars(select(Recipe).options(
-        selectinload(Recipe.versions).selectinload(RecipeVersion.lines).selectinload(RecipeLine.item)))
+    rs = db.scalars(select(Recipe).options(*_with_lines()))
     return {r.swype_code: r for r in rs}
 
 
 def save(db: Session, code: str, *, name: str, lines: list[dict], effective_from: date | None = None,
          ignored: bool = False, steps: str | None = None, notes: str | None = None) -> Recipe:
-    """lines: {"item_id", "qty", "unit"}. effective_from None corrects the version in effect (or creates
-    the first one); a date starts a new version from that day, or replaces the one already on that day."""
+    """lines: {"item_ids": [...], "qty", "unit"} (or one "item_id"). Several item_ids make a line poured from
+    any one of them. effective_from None corrects the version in effect (or creates the first one); a date
+    starts a new version from that day, or replaces the one already on that day."""
     code = code.strip()
     if not code:
         raise RecipeError("Swype item # is required")
     clean = []
     for i, ln in enumerate(lines):
-        item = db.get(InventoryItem, ln.get("item_id") or "")
-        if item is None:
+        ids = [x for x in (ln.get("item_ids") or [ln.get("item_id")]) if x]
+        items = []
+        for item_id in dict.fromkeys(ids):  # same item twice is once
+            item = db.get(InventoryItem, item_id)
+            if item is None:
+                raise RecipeError(f"line {i + 1}: pick an inventory item")
+            items.append(item)
+        if not items:
             raise RecipeError(f"line {i + 1}: pick an inventory item")
+        names = " or ".join(it.name for it in items)
         qty = Decimal(str(ln.get("qty") or 0))
         if qty <= 0:
-            raise RecipeError(f"line {i + 1} ({item.name}): portion must be more than 0")
+            raise RecipeError(f"line {i + 1} ({names}): portion must be more than 0")
         unit = ln.get("unit") or "oz"
         if unit not in BASE_UNITS or db.get(Unit, unit) is None:
             raise RecipeError(f"line {i + 1}: unknown unit {unit!r}")
-        clean.append((item, qty, unit))
+        clean.append((items, qty, unit))
     if not clean and not ignored:
         raise RecipeError("add at least one ingredient, or mark the item as taking no stock")
     r = load(db, code)
@@ -132,8 +150,9 @@ def save(db: Session, code: str, *, name: str, lines: list[dict], effective_from
             r.versions.append(v)
             r.versions.sort(key=lambda x: x.effective_from)
     v.lines.clear()
-    for pos, (item, qty, unit) in enumerate(clean):
-        v.lines.append(RecipeLine(item=item, qty=qty, unit=unit, position=pos))
+    for pos, (items, qty, unit) in enumerate(clean):
+        v.lines.append(RecipeLine(item=items[0], qty=qty, unit=unit, position=pos,
+                                  options=[RecipeLineOption(item=it, position=k) for k, it in enumerate(items[1:], 1)]))
     db.flush()
     return r
 
@@ -170,7 +189,7 @@ def codes_using(db: Session, item_ids: list[str]) -> dict[str, list[tuple[str, s
         v = current_version(r)
         if r.ignored or v is None:
             continue
-        for item_id in {ln.item_id for ln in v.lines} & wanted:
+        for item_id in {i for ln in v.lines for i in ln.item_ids} & wanted:
             out.setdefault(item_id, []).append((code, r.name))
     return out
 
@@ -203,7 +222,7 @@ def base_recipe_items(recipes: dict[str, Recipe]) -> dict[str, InventoryItem]:
     out = {}
     for code, r in recipes.items():
         v = current_version(r)
-        if "_" not in code and not r.ignored and v is not None and len(v.lines) == 1:
+        if "_" not in code and not r.ignored and v is not None and len(v.lines) == 1 and not v.lines[0].options:
             out[code] = v.lines[0].item
     return out
 
