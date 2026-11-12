@@ -135,3 +135,37 @@ def test_food_and_coffee_take_no_stock(client, db, stock):
     assert client.post("/api/recipes/no-stock").json() == {"saved": 2}
     assert client.get("/api/recipes/a").json()["ignored"] and client.get("/api/recipes/b").json()["ignored"]
     assert client.get("/api/recipes/c").status_code == 404
+
+
+def test_food_is_tracked_like_drinks_once_the_platform_switches_it_on(client, platform, db, stock):
+    loc = default_location(db).id
+    item(client, "50", "Chicken breast", "Meat", "kg", 1)
+    sold(db, ("a", "Chicken Sandwich", "Food", "Sandwiches", 5), ("b", "Coffee", "Beverage", "Coffee", 5), ("c", "Happy Jager", "Liquor", "Booze", 3))
+    assert client.post("/api/recipes/no-stock", json={}).json()["saved"] == 2
+    assert set(queue(client)) == {"Happy Jager"}
+    assert client.get("/api/auth/me").json()["user"]["business"]["track_food"] is False
+
+    # only the platform console can switch it
+    assert client.patch(f"/api/platform/businesses/{loc}", json={"track_food": True}).status_code == 403
+    assert client.patch(f"/api/businesses/{loc}", json={"track_food": True}).json().get("track_food") is False
+    assert platform.patch("/api/platform/businesses/nope", json={"track_food": True}).status_code == 404
+    r = platform.patch(f"/api/platform/businesses/{loc}", json={"track_food": True}).json()
+    assert r["track_food"] is True and r["food_released"] == 1
+
+    # the dish is back in the queue, matched to food stock only, and its portion is for a person to give
+    assert client.get("/api/auth/me").json()["user"]["business"]["track_food"] is True
+    res = client.get("/api/recipes/match").json()
+    q = {x["name"]: x for x in res["rows"]}
+    assert set(q) == {"Chicken Sandwich", "Happy Jager"} and res["no_stock"] == 0  # coffee keeps its no-stock recipe
+    dish = q["Chicken Sandwich"]
+    assert [c["name"] for c in dish["candidates"]] == ["Chicken breast"] and not dish["clear"]
+    assert dish["lines"][0]["qty"] is None and dish["lines"][0]["unit"] == "g" and dish["check"] == "portion size"
+    assert client.post("/api/recipes/no-stock", json={}).json()["saved"] == 0  # and it is not marked again
+
+    # linked like a drink, it stays linked when the flag goes off; a new dish takes no stock again
+    line = {"item_id": dish["candidates"][0]["id"], "qty": "180", "unit": "g"}
+    assert client.post("/api/recipes/match/approve", json={"rows": [{"code": "a", "name": "Chicken Sandwich", "lines": [line], "ignored": False}]}).json()["saved"] == 1
+    assert platform.patch(f"/api/platform/businesses/{loc}", json={"track_food": False}).json()["track_food"] is False
+    assert client.get("/api/recipes/a").json()["ignored"] is False
+    detail = platform.get(f"/api/platform/tenants/{default_location(db).tenant_id}").json()
+    assert detail["businesses"][0]["track_food"] is False

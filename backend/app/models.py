@@ -91,6 +91,8 @@ class Location(Base):
     website: Mapped[str | None] = mapped_column(String(200))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     logo_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when the logo last changed; null: none
+    # food sold is linked to stock by recipes like drinks are, instead of taking no stock; set from the platform console
+    track_food: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     swype_location_id: Mapped[str | None] = mapped_column(String(64))
     # SwypePOS back office login of this business (services/swype_api.py); the password is encrypted (services/secretbox.py)
     swype_email: Mapped[str | None] = mapped_column(String(254))

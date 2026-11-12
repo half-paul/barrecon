@@ -21,6 +21,7 @@ BASE_UNITS: dict[str, tuple[str, Decimal]] = {
     "dash": ("volume", Decimal("0.92")),
     "g": ("mass", Decimal(1)),
     "kg": ("mass", Decimal(1000)),
+    "lb": ("mass", Decimal("453.59237")),
     "each": ("count", Decimal(1)),
 }
 

@@ -1,13 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type ImportSummary, type Item, type MatchQueue, type MatchRow, type MenuRow, type Recipe, type RecipeLine, type RecipeLineItem, day, groupBy, n } from "../lib/api";
-import { useReadOnly } from "../lib/auth";
+import { useMe, useReadOnly } from "../lib/auth";
 import { Button, Combobox, Empty, Field, FileButton, Flash, Lightbox, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
 
 // Every Swype item sits on one tab: not linked yet, a real recipe, a straight 1-to-1 pour, or taking no stock. A recipe row is the link either way.
 const TABS = ["todo", "recipes", "direct", "nostock", "stock"] as const;
 type Tab = (typeof TABS)[number];
-const UNITS = ["oz", "ml", "dash", "each", "g", "l", "cl"];
+const UNITS = ["oz", "ml", "dash", "each", "g", "kg", "lb", "l", "cl"];
 const pack = (l: Pick<RecipeLine, "pack_name">) => l.pack_name || "pack";
 
 /** "75 ml · 0.10 bottle" for one portion in the item’s own unit. */
@@ -306,6 +306,7 @@ const itemLabel = (it: { name: string; sku: string }) => `${it.name} (${it.sku})
 /** Everything sold with no recipe, split into what can be approved as it stands and what needs a person. */
 function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError }: Shared & { rows: MatchRow[]; foodCoffee: number }) {
   const ro = useReadOnly();
+  const noStockKind = useMe()?.business?.track_food ? "coffee" : "food and coffee";  // a business that tracks food links it instead
   const byLabel = useMemo(() => new Map(items.map((it) => [itemLabel(it), it])), [items]);
   const options = useMemo(() => [...byLabel.keys()], [byLabel]);
   const [edits, setEdits] = useState<Record<string, Partial<MatchDraft>>>({});
@@ -317,7 +318,7 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
   const set = (code: string, p: Partial<MatchDraft>) => setEdits((e) => ({ ...e, [code]: { ...e[code], ...p } }));
   const pick = (r: MatchRow, d: MatchDraft, v: string) => {
     const it = byLabel.get(v);
-    set(r.code, { item: v, unit: it?.stock_unit === "each" ? "each" : "oz", on: d.on || (!!it && Number(d.qty) > 0) });
+    set(r.code, { item: v, unit: it?.stock_unit === "each" ? "each" : it?.stock_unit === "g" || it?.stock_unit === "kg" ? "g" : it?.stock_unit === "lb" ? "lb" : "oz", on: d.on || (!!it && Number(d.qty) > 0) });
   };
   const ready = (r: MatchRow, d: MatchDraft) => d.noStock || r.lines.length > 1 || (byLabel.has(d.item) && Number(d.qty) > 0);
   const chosen = rows.filter((r) => { const d = draft(r); return d.on && ready(r, d); });
@@ -335,7 +336,7 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
     const x = await api.post<{ saved: number }>("/api/recipes/match/approve", { rows: body });
     return `Linked ${x.saved} items.`;
   });
-  const markFood = () => act(async () => `Marked ${(await api.post<{ saved: number }>("/api/recipes/no-stock", {})).saved} food and coffee items as taking no stock.`);
+  const markFood = () => act(async () => `Marked ${(await api.post<{ saved: number }>("/api/recipes/no-stock", {})).saved} ${noStockKind} items as taking no stock.`);
 
   const row = (r: MatchRow) => {
     const d = draft(r);
@@ -374,7 +375,7 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
   if (rows.length === 0) return <Empty>Nothing to link here.</Empty>;
   return (
     <div className="flex flex-col gap-6">
-      {foodCoffee > 0 && <Notice kind="info"><span className="flex flex-wrap items-center justify-between gap-3">{foodCoffee} food and coffee items take no stock.<Button kind="quiet" edit onClick={markFood} disabled={busy}>Mark them</Button></span></Notice>}
+      {foodCoffee > 0 && <Notice kind="info"><span className="flex flex-wrap items-center justify-between gap-3">{foodCoffee} {noStockKind} items take no stock.<Button kind="quiet" edit onClick={markFood} disabled={busy}>Mark them</Button></span></Notice>}
       {clear.length > 0 && <details className="card p-3">
         <summary className="cursor-pointer select-none"><span className="font-semibold">Ready to link ({clear.length})</span> <span className="text-sm text-muted">matched clearly. Open to check them, and untick anything wrong.</span></summary>
         <ul className="mt-3 -mx-3 -mb-3 border-t border-line">{clear.map(row)}</ul>

@@ -18,7 +18,7 @@ FORGOT_IP_LIMIT = 20  # reset requests from one address in auth.LOCK_WINDOW
 def business_out(b: Location) -> dict:
     """What every page may show of a business: its name, contact details and whether it has a logo."""
     return {"id": b.id, "name": b.name, "kind": b.kind, "address": b.address, "city": b.city, "phone": b.phone,
-            "email": b.email, "website": b.website, "is_active": b.is_active,
+            "email": b.email, "website": b.website, "is_active": b.is_active, "track_food": bool(b.track_food),
             "logo_at": b.logo_at.isoformat() if b.logo_at else None}
 
 

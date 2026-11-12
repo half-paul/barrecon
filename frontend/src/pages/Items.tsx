@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Group, type ImportSummary, type Item, groupBy, n } from "../lib/api";
-import { useReadOnly } from "../lib/auth";
+import { useMe, useReadOnly } from "../lib/auth";
 import { Button, Empty, Field, FileButton, Flash, inputCls, Loading, Nil, Notice, Page, useAsync } from "../lib/ui";
 
 type Units = { code: string; dimension: string }[];
@@ -39,6 +39,7 @@ export default function Items() {
   const toggle = (c: string) => setCollapsed((s) => { const x = new Set(s); if (x.has(c)) x.delete(c); else x.add(c); return x; });
   const allCollapsed = groups.length > 0 && groups.every(([c]) => collapsed.has(c));
   const units = useAsync(() => api.get<Units>("/api/items/units"));
+  const food = !!useMe()?.business?.track_food;  // food is stock here too: the hints name weights and food packs
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(blank);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -85,9 +86,9 @@ export default function Items() {
           <Field label="SKU (BCLDB no. or your own code)"><input className={inputCls} value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} /></Field>
           <Field label="Name"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Group" hint="Picking a group fills in its unit and pack"><input className={inputCls} list="item-groups" value={form.category} onChange={(e) => setCategory(e.target.value)} /></Field>
-          <Field label="Counted in" hint="ml for liquids, each for cans/bottles of beer"><select className={inputCls} value={form.stock_unit} onChange={(e) => setForm({ ...form, stock_unit: e.target.value })}>{(units.data ?? []).map((u) => <option key={u.code}>{u.code}</option>)}</select></Field>
+          <Field label="Counted in" hint={food ? "ml for liquids, each for cans/bottles of beer, kg, lb or g for food" : "ml for liquids, each for cans/bottles of beer"}><select className={inputCls} value={form.stock_unit} onChange={(e) => setForm({ ...form, stock_unit: e.target.value })}>{(units.data ?? []).map((u) => <option key={u.code}>{u.code}</option>)}</select></Field>
           <Field label="Pack name"><input className={inputCls} value={form.pack_name} onChange={(e) => setForm({ ...form, pack_name: e.target.value })} /></Field>
-          <Field label="Pack size (in counted unit)" hint="750 for a 750 ml bottle; 1 for a can"><input className={`${inputCls} num`} value={form.pack_size} onChange={(e) => setForm({ ...form, pack_size: e.target.value })} /></Field>
+          <Field label="Pack size (in counted unit)" hint={food ? "750 for a 750 ml bottle; 1 for a can; 2.5 for a 2.5 kg bag" : "750 for a 750 ml bottle; 1 for a can"}><input className={`${inputCls} num`} value={form.pack_size} onChange={(e) => setForm({ ...form, pack_size: e.target.value })} /></Field>
           <Field label="Packs per case / flat"><input className={`${inputCls} num`} value={form.case_size} onChange={(e) => setForm({ ...form, case_size: e.target.value })} /></Field>
           <Field label="Cost per pack ($)"><input className={`${inputCls} num`} value={form.pack_cost} onChange={(e) => setForm({ ...form, pack_cost: e.target.value })} /></Field>
           <Field label="Par (packs)"><input className={`${inputCls} num`} value={form.par_level} onChange={(e) => setForm({ ...form, par_level: e.target.value })} /></Field>
@@ -177,8 +178,8 @@ function ViewRow({ it, onEdit }: { it: Item; onEdit: () => void }) {
       <td>{it.name}</td>
       <td>{it.category || <span className="text-faint">{UNCAT}</span>}</td>
       <td>{it.pack_name || <Nil />}</td>
-      <td className="r num whitespace-nowrap">{n(it.pack_size, 0)}&nbsp;<span className="text-muted">{it.stock_unit}</span></td>
-      <td className="r num">{n(it.case_size, 0)}</td>
+      <td className="r num whitespace-nowrap">{n(it.pack_size, 3)}&nbsp;<span className="text-muted">{it.stock_unit}</span></td>
+      <td className="r num">{n(it.case_size, 3)}</td>
       <td className="r num">{it.pack_cost ? n(it.pack_cost) : <Nil />}</td>
       <td className="r num">{it.par_level ? n(it.par_level, 1) : <Nil />}</td>
       <td className="r num">{lastCount(it)}</td>

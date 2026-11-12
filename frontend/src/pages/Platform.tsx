@@ -23,7 +23,7 @@ type Overview = { month: string; tenants: number; active_tenants: number; suspen
   daily: Daily[]; prices: Record<string, [number, number]> };
 type Detail = {
   tenant: TenantRow; month: string;
-  businesses: { id: string; name: string; kind: string | null; city: string | null; is_active: boolean; has_logo: boolean; swype: boolean; members: number; items: number;
+  businesses: { id: string; name: string; kind: string | null; city: string | null; is_active: boolean; has_logo: boolean; track_food: boolean; swype: boolean; members: number; items: number;
     counts_posted: number; receipts_read: number; tokens: number; cost_usd: number; storage_bytes: number; last_activity: string | null }[];
   users: { id: string; username: string; display_name: string; email: string | null; is_admin: boolean; is_active: boolean; mfa_enabled: boolean; invite_pending: boolean; last_login_at: string | null }[];
   months: { month: string; calls: number; input_tokens: number; output_tokens: number; cost_usd: number }[]; daily: Daily[];
@@ -219,6 +219,16 @@ function TenantPage() {
     if (on && !confirm(`Suspend ${t.name}? Its ${t.users} logins stop working at once and its nightly imports stop. Nothing is deleted, and you can reactivate it any time.`)) return;
     try { await api.post(`/api/platform/tenants/${t.id}/${on ? "suspend" : "reactivate"}`); setMsg({ kind: "ok", text: on ? `${t.name} is suspended.` : `${t.name} is active again.` }); detail.reload(); } catch (e) { fail(e); }
   };
+  const setFood = async (b: Detail["businesses"][number], on: boolean) => {
+    if (!confirm(on
+      ? `Track food at ${b.name}? Food it sold stops being marked as taking no stock: every dish goes to the Recipes queue to be linked to stock items, like drinks.`
+      : `Stop tracking food at ${b.name}? Recipes already made for food stay. Food with no recipe takes no stock again from the next sales import.`)) return;
+    try {
+      const r = await api.patch<{ food_released: number }>(`/api/platform/businesses/${b.id}`, { track_food: on });
+      setMsg({ kind: "ok", text: on ? `${b.name} now tracks food.${r.food_released ? ` ${r.food_released} dishes went back to its Recipes queue.` : ""}` : `${b.name} no longer tracks food.` });
+      detail.reload();
+    } catch (e) { fail(e); }
+  };
   const used = daily.filter((x) => x.calls > 0).reverse();
   return (
     <Page title={t.name} sub={<><Link className="underline" to="/platform">Tenants</Link> · <StatusChip status={t.status} />{t.plan ? ` · ${t.plan}` : ""} · since {d(t.created_at)}</>}
@@ -243,18 +253,20 @@ function TenantPage() {
       {businesses.length === 0 ? <Empty>No business yet. Their admin adds the first one at login.</Empty> : (
         <div className="table-box mb-6"><table className="grid">
           <thead><tr><th>Business</th><th className="r">People</th><th className="r">Stock items</th><th className="r">Counts posted</th><th className="r">Receipts read</th>
-            <th className="r">Tokens</th><th className="r">Est. cost</th><th className="r">Files</th><th>Swype</th><th>Last activity</th></tr></thead>
+            <th className="r">Tokens</th><th className="r">Est. cost</th><th className="r">Files</th><th>Swype</th><th>Food tracking</th><th>Last activity</th></tr></thead>
           <tbody>{businesses.map((b) => (
             <tr key={b.id} className={b.is_active ? "" : "opacity-60"}>
               <td><div className="font-medium">{b.name}{!b.is_active && <span className="text-xs text-muted font-normal"> · switched off</span>}</div><div className="text-xs text-muted">{[b.kind, b.city].filter(Boolean).join(" · ")}</div></td>
               <td className="r num">{b.members}</td><td className="r num">{n(b.items, 0)}</td><td className="r num">{b.counts_posted}</td><td className="r num">{b.receipts_read}</td>
               <td className="r num">{n(b.tokens, 0)}</td><td className="r num">{usd(b.cost_usd)}</td><td className="r num">{bytes(b.storage_bytes)}</td>
               <td className="text-sm">{b.swype ? "set" : <span className="text-faint">not set</span>}</td>
+              <td className="text-sm whitespace-nowrap"><span className={b.track_food ? "text-accent font-medium" : "text-faint"}>{b.track_food ? "on" : "off"}</span>{" "}
+                <button type="button" className="underline text-muted hover:text-ink" onClick={() => setFood(b, !b.track_food)}>{b.track_food ? "switch off" : "switch on"}</button></td>
               <td className="text-sm text-muted whitespace-nowrap">{b.last_activity ? dt(b.last_activity) : "never"}</td>
             </tr>))}
           </tbody>
         </table></div>)}
-      <p className="text-xs text-muted -mt-4 mb-6">People counts members; admins reach every business. Receipts, tokens and cost are for {monthName(detail.data.month)}.</p>
+      <p className="text-xs text-muted -mt-4 mb-6">People counts members; admins reach every business. Food tracking: food sold is linked to stock by recipes, like drinks, instead of taking no stock. Receipts, tokens and cost are for {monthName(detail.data.month)}.</p>
 
       <div className="flex items-center justify-between mb-2"><h2 className="font-semibold">Logins</h2>
         <Button kind="quiet" onClick={() => setAddingAdmin((v) => !v)}>{addingAdmin ? "Cancel" : "Add an admin"}</Button></div>
