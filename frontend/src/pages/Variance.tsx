@@ -102,11 +102,9 @@ export default function Variance() {
   const all = (r?.rows ?? []).map(derive);
   const pools = r?.pools ?? [];
   const poolItems = pools.reduce((t, p) => t + p.members.length, 0);
-  const poolsShort = pools.filter((p) => derivePool(p).kind === "short").length;
   const shown = all.filter(inView);
   const count = (k: Kind) => shown.filter((x) => x.kind === k).length;
   const notCounted = all.filter((x) => x.kind === "not_counted").length;
-  const off = shown.filter((x) => x.status === "off").length;
   const needle = search.trim().toLowerCase();
   const lines = shown.filter((x) => (filter === "all" || x.kind === filter)
     && (!needle || x.name.toLowerCase().includes(needle) || x.sku.toLowerCase().includes(needle) || (x.category ?? "").toLowerCase().includes(needle)));
@@ -180,6 +178,16 @@ export default function Variance() {
           }} />}
           {all.length > 0 && <Chart lines={all} />}
 
+          {pools.length > 0 && (
+            <section id="alternatives" className="panel scroll-mt-4" aria-labelledby="alternatives-title">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+                <PanelHead icon="shuffle" id="alternatives-title" title="Stock items used as alternatives"
+                  sub="Stock items that can stand in for one another in recipes. Swype doesn’t say which one was poured, so each set is checked as one." />
+                <span className="pill pill-none">{pools.length} set{pools.length === 1 ? "" : "s"}</span>
+              </div>
+              <div className="flex flex-col divide-y divide-line [&>*]:py-5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">{pools.map((p) => <PoolCard key={p.id} p={p} threshold={r.threshold_pct} />)}</div>
+            </section>)}
+
           <section id="individual" className="panel scroll-mt-4" aria-labelledby="individual-title">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <PanelHead icon="box" id="individual-title" title="Individual stock items"
@@ -212,16 +220,6 @@ export default function Variance() {
               : loud.length === 0 ? <p className="text-sm text-muted py-6 text-center">Nothing to chase: every item in view matches or is off by less than {n(r.threshold_pct, 0)}%. <a className="underline" href="#quiet" onClick={() => setQuietPicked(true)}>See them at the bottom of the page</a>.</p>
               : <>{ledgerHead}{loud.map(row)}</>}
           </section>
-
-          {pools.length > 0 && (
-            <section id="alternatives" className="panel scroll-mt-4" aria-labelledby="alternatives-title">
-              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-                <PanelHead icon="shuffle" id="alternatives-title" title="Stock items used as alternatives"
-                  sub="Stock items that can stand in for one another in recipes. Swype doesn’t say which one was poured, so each set is checked as one." />
-                <span className="pill pill-none">{pools.length} set{pools.length === 1 ? "" : "s"}</span>
-              </div>
-              <div className="flex flex-col gap-5">{pools.map((p) => <PoolCard key={p.id} p={p} threshold={r.threshold_pct} />)}</div>
-            </section>)}
 
           {r.unmapped.length > 0 && (
             <section className="panel" aria-labelledby="unmapped-title">
@@ -453,9 +451,22 @@ function DiffPill({ kind, status, text }: { kind: Kind; status: string; text: st
   return <span className={`pill ${cls}`}>{icon && <Icon name={icon} size={14} strokeWidth={2.25} />}{text}</span>;
 }
 
+/** A small picture for the item's category, so a long list scans by kind of drink. */
+const CATEGORY_ICONS: [RegExp, IconName, string][] = [
+  [/wine|prosecco|champagne|sparkling/i, "wine", "bg-paper-3 text-ink-2"],  // not red: red means short on this page
+  [/beer|lager|ale|cider|keg|draft|draught/i, "beer", "bg-amber-soft text-amber"],
+  [/spirit|whisk|scotch|bourbon|gin|vodka|rum|tequila|mezcal|liqueur|brandy|cognac/i, "bottle", "bg-info-soft text-info"],
+  [/cocktail|mixer|juice|soda|syrup/i, "glass", "bg-ok-soft text-ok"],
+];
+function CategoryIcon({ category }: { category: string | null }) {
+  const [, name, tone] = CATEGORY_ICONS.find(([re]) => re.test(category ?? "")) ?? [null, "box" as IconName, "bg-paper-3 text-muted"];
+  return <span aria-hidden className={`grid place-items-center w-9 h-9 rounded-[10px] shrink-0 ${tone}`}><Icon name={name} size={18} /></span>;
+}
+
 function Section({ x, q, open, onToggle, threshold }: { x: Line; q: (v: Num | number, x: VarianceRow, signed?: boolean) => string; open: boolean; onToggle: (open: boolean) => void; threshold: Num }) {
   const diffText = x.diff == null ? "n/a" : x.kind === "matches" ? "Matches" : `${q(Math.abs(x.diff), x)} ${x.kind}`;
-  const chip = x.status === "off" ? [`Off ≥ ${n(threshold, 0)}%`, "bg-danger-soft text-danger"] : CHIP[x.status];
+  // past the threshold already shows as a red difference pill, so it gets no chip of its own
+  const chip = CHIP[x.status];
   const flow = [`Opening ${q(x.opening, x)}`];
   if (Number(x.received)) flow.push(`+ in ${q(x.received, x)}`);
   if (Number(x.removed)) flow.push(`− out ${q(x.removed, x)}`);
@@ -464,17 +475,20 @@ function Section({ x, q, open, onToggle, threshold }: { x: Line; q: (v: Num | nu
   return (
     <details id={`item-${x.item_id}`} className="lg-row scroll-mt-4" open={open} onToggle={(e) => onToggle(e.currentTarget.open)}>
       <summary className="lg-cols">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap font-semibold">
-            <span className="lg-arrow inline-block text-muted text-lg leading-none transition-transform" aria-hidden>›</span>
-            <span>{x.name}</span>
-            {chip && <span className={`lg-chip ${chip[1]}`}>{chip[0]}</span>}
+        <div className="min-w-0 flex items-center gap-3">
+          <span className="lg-arrow inline-block text-muted text-lg leading-none transition-transform" aria-hidden>›</span>
+          <CategoryIcon category={x.category} />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap font-semibold">
+              <span>{x.name}</span>
+              {chip && <span className={`lg-chip ${chip[1]}`}>{chip[0]}</span>}
+            </div>
+            <div className="text-xs text-muted mt-0.5 num">{x.category ? `${x.category} · ` : ""}{flow.join(" ")}</div>
           </div>
-          <div className="text-xs text-muted mt-0.5 pl-4 num">{x.category ? `${x.category} · ` : ""}{flow.join(" ")}</div>
         </div>
         <div className="md:text-right num"><span className="md:sr-only block text-xs text-muted">Should be left</span><strong className="font-medium whitespace-nowrap">{q(x.shouldLeft, x)}</strong></div>
         <div className="md:text-right num"><span className="md:sr-only block text-xs text-muted">Actually left</span><strong className="font-medium whitespace-nowrap">{x.left == null ? "Not counted" : q(x.left, x)}</strong></div>
-        <div className="md:text-right"><span className="md:sr-only block text-xs text-muted">Difference</span><DiffPill kind={x.kind} status={x.status} text={diffText} /></div>
+        <div className="md:text-right" title={x.status === "off" ? `Off by ${n(threshold, 0)}% or more` : undefined}><span className="md:sr-only block text-xs text-muted">Difference</span><DiffPill kind={x.kind} status={x.status} text={diffText} /></div>
       </summary>
       <div className="pl-7 pr-3 pb-3 overflow-x-auto">
         {x.no_recipe ? <p className="text-xs text-muted pb-1">No recipe uses {x.name}, so sales can’t explain any of its use. Add it to the recipe of every Swype item that takes it (a bottle of beer too: 1 each).</p>
@@ -515,7 +529,7 @@ function PoolCard({ p, threshold }: { p: VariancePool; threshold: Num }) {
     <article id={`pool-${p.id}`} className="scroll-mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] items-start">
       <div className="min-w-0 rounded-[12px] border border-line bg-paper p-4">
         <div className="flex items-start gap-3">
-          <span className="panel-icon !bg-paper-3 !text-ink"><Icon name="glass" size={20} /></span>
+          <span className="panel-icon !w-11 !h-11 !rounded-[12px] !bg-info-soft !text-info"><Icon name="shuffle" size={20} /></span>
           <div className="min-w-0 flex-1">
             <h3 className="text-lg font-semibold leading-tight">{sellingName(p)}</h3>
             <p className="text-sm text-muted">{p.members.map((m) => m.name).join(", ")}</p>

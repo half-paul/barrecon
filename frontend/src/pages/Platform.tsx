@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useStickyTop } from "../lib/sticky";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ThemeToggle } from "../App";
 import { api, d, dt, n } from "../lib/api";
@@ -40,9 +41,10 @@ const tabs = [["/platform", "Tenants"], ["/platform/usage", "Claude usage"], ["/
 
 export default function Platform({ onLogout }: { onLogout: () => void }) {
   const me = useMe();
+  const bar = useStickyTop();
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-40 bg-paper border-b border-line">
+      <header ref={bar} className="sticky top-0 z-40 bg-paper border-b border-line">
         <div className="max-w-[1280px] mx-auto px-4 sm:px-7 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
           <NavLink to="/platform" className="flex items-center gap-2 font-semibold mr-2">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" strokeWidth="1.8" aria-hidden><path d="M3 9l9-6 9 6v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><path d="M9 21v-8h6v8" /></svg>

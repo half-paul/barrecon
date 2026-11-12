@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, type CountDetail, type CountSession, type Me, onSwitchElsewhere, showBusiness } from "./lib/api";
 import { BusinessMark, BusinessSwitcher, switchBusiness } from "./lib/business";
@@ -7,6 +7,7 @@ import { type CountBar, CountBarContext } from "./lib/countbar";
 import { type Command, CommandPalette, SearchIcon, shortcutLabel } from "./lib/palette";
 import { Button, inputCls } from "./lib/ui";
 import { Icon, type IconName } from "./lib/icons";
+import { useStickyTop, useWideTables } from "./lib/sticky";
 import Login from "./pages/Login";
 import SetPassword from "./pages/SetPassword";
 import Home from "./pages/Home";
@@ -182,6 +183,8 @@ export default function App() {
     setLoggedOut(`Logged out after ${user?.idle_logout_minutes} minute${user?.idle_logout_minutes === 1 ? "" : "s"} without activity.`); setUser(null); navigate("/");
   }, expired);
 
+  const bar = useStickyTop();
+  useWideTables();
   const me = user ?? null;
   const canCount = can(me, "counts", "edit");
   const commands = useMemo<Command[]>(() => [
@@ -207,7 +210,7 @@ export default function App() {
       <SideNav onLogout={logout} onSearch={() => setPalette(true)} onCount={canCount && !countBar ? startCountSafe : null} />
       <div className="flex-1 min-w-0 flex flex-col">
       {/* phones: business and menu; every width: the count actions, kept in view */}
-      <header className={`sticky top-0 z-40 bg-paper/90 backdrop-blur border-b border-line ${countBar ? "" : "md:hidden"}`}>
+      <header ref={bar} className={`sticky top-0 z-40 bg-paper/90 backdrop-blur border-b border-line ${countBar ? "" : "md:hidden"}`}>
         <div className="max-w-[1280px] mx-auto px-4 sm:px-7 py-3 flex items-center gap-x-3">
           <span className="md:hidden min-w-0"><BusinessSwitcher compact={!!countBar} /></span>
           <div className="ml-auto flex items-center gap-2">

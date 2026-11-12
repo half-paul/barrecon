@@ -30,6 +30,9 @@ async function req<T>(method: string, url: string, body?: unknown, form?: FormDa
   const text = await r.text();
   let data: unknown = text;
   try { data = text ? JSON.parse(text) : null; } catch { /* keep text */ }
+  // a web page instead of data: the server doesn't have this endpoint (an older build). Fail like an error, don't hand
+  // HTML to code expecting an object.
+  if (r.ok && typeof data === "string" && /^\s*<(!doctype|html)/i.test(data)) throw new ApiError(502, "The server is out of date for this page. Reload, or ask an admin to update it.");
   if (r.status === 409 && r.headers.get("X-Business-Changed")) { window.location.reload(); return new Promise<T>(() => {}); }
   if (!r.ok) {
     const d = data as { detail?: unknown };

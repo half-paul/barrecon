@@ -42,7 +42,13 @@ table.grid :is(th, td):last-child { padding-right: 0; }
 table.grid tbody tr:hover td { background: color-mix(in srgb, var(--color-raised) 60%, transparent); }
 table.grid th.r, table.grid td.r { text-align: right; }
 table.grid tr.section td { background: transparent; color: var(--color-ink); font-size: var(--text-sm); font-weight: 600; padding-top: var(--space-lg); border-bottom-color: var(--color-line-strong); }
-.table-box { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* Sideways scroll only while the table is wider than its box (lib/sticky.ts adds .scrolls): a scrolling box would stop
+ * the header row sticking to the page. */
+.table-box.scrolls { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* Long lists keep their header row in view under the app bar (--sticky-top, lib/sticky.ts). The background covers the
+ * rows passing under it: the page, or the card or panel the table sits in (--sticky-bg). */
+:root { --sticky-bg: var(--color-paper); }
+table.grid thead th { position: sticky; top: var(--sticky-top, 0px); z-index: 5; background: var(--sticky-bg); box-shadow: inset 0 calc(-1 * var(--rule-hair)) 0 var(--color-line-strong); }
 
 /* Phones: iOS zooms into any field under 16px, so fields get 16px; table cells and number boxes tighten to fit 360px */
 @media (max-width: 639px) {
@@ -56,7 +62,7 @@ table.grid tr.section td { background: transparent; color: var(--color-ink); fon
 /* component classes sit in a layer so Tailwind utilities on the same element (text-left, w-44, p-5) win */
 @layer components {
   /* One container recipe: a tinted well, no border. A table never goes inside one. */
-  .card { background: var(--color-paper-2); border-radius: var(--radius-card); }
+  .card { background: var(--color-paper-2); border-radius: var(--radius-card); --sticky-bg: var(--color-paper-2); }
   .label { font-size: var(--text-sm); color: var(--color-muted); font-weight: 500; }
   .cell-input { width: 5.5rem; text-align: right; padding: var(--space-2xs) var(--space-xs); border: var(--rule-hair) solid var(--color-edge); border-radius: var(--radius-control); background: var(--color-paper); color: var(--color-ink); }
   .cell-input:hover { border-color: var(--color-muted); }
@@ -82,9 +88,17 @@ table.grid tr.section td { background: transparent; color: var(--color-ink); fon
 
   /* Variance ledger: one ruled row per item, columns shared with the head row. */
   .lg-cols { display: grid; gap: var(--space-sm); align-items: center; }
+  /* phones: the item on its own line, then its three figures in one row */
+  @media (max-width: 47.99rem) {
+    .lg-cols { grid-template-columns: max-content max-content minmax(0, 1fr); align-items: end; column-gap: var(--space-md); row-gap: var(--space-xs); }
+    .lg-cols > :first-child { grid-column: 1 / -1; }
+    .lg-cols > :last-child { justify-self: end; text-align: right; }
+    .lg-cols .pill { font-size: var(--text-xs); padding-inline: 8px; }
+  }
   @media (min-width: 48rem) { .lg-cols { grid-template-columns: minmax(0, 1fr) 8.5rem 8.5rem 9.5rem; } }
   .lg-head { border-bottom: var(--rule-hair) solid var(--color-line-strong); padding-block: var(--space-xs); font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); }
-  .lg-head.band { border-bottom: 0; padding-inline: var(--space-sm); color: var(--color-ink-2); font-weight: 600; }
+  .lg-head { position: sticky; top: var(--sticky-top, 0px); z-index: 5; background: var(--sticky-bg); }
+  .lg-head.band { background: var(--color-paper-3); box-shadow: 0 -6px 0 var(--sticky-bg); border-bottom: 0; padding-inline: var(--space-sm); color: var(--color-ink-2); font-weight: 600; }
   .panel .lg-row > summary { padding-inline: var(--space-sm); border-radius: 8px; }
   .lg-row { border-bottom: var(--rule-hair) solid var(--color-line); }
   .lg-row > summary { list-style: none; cursor: pointer; padding-block: var(--space-sm); }
@@ -132,7 +146,7 @@ table.grid tr.section td { background: transparent; color: var(--color-ink); fon
   table.lg-links :is(th, td):last-child { padding-right: 0; }
   table.lg-links tfoot td { font-weight: 500; }
   /* Section panel: a raised sheet with a head (icon badge, title, line of help) and its content. */
-  .panel { background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-line); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel); padding: var(--space-lg); }
+  .panel { --sticky-bg: var(--color-paper-2); background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-line); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel); padding: var(--space-lg); }
   @media (max-width: 39.99rem) { .panel { padding: var(--space-md); border-radius: var(--radius-card); } }
   .panel-head { display: flex; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-md); }
   .panel-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: var(--color-paper-3); color: var(--color-ink-2); flex-shrink: 0; }
