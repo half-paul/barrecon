@@ -32,7 +32,7 @@ def test_delete_flags_a_posted_count_and_keeps_its_rows(client, db):
     row = next(i for i in client.get("/api/items").json() if i["id"] == item["id"])
     assert float(row["last_counted_packs"]) == 4
     r = client.get(f"/api/variance?opening={keep['id']}&closing={gone['id']}")
-    assert r.status_code == 400 and "not posted" in r.json()["detail"]
+    assert r.status_code == 400 and "no longer posted" in r.json()["detail"]
 
 
 def test_a_deleted_count_cannot_be_changed_or_deleted_again(client):

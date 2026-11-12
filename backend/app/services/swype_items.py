@@ -134,7 +134,7 @@ def item_out(m: SwypeMenuItem, sold: dict | None = None) -> dict:
 
 def update(db: Session, code: str, *, name: str | None = None, is_active: bool | None = None) -> SwypeMenuItem:
     """Rename (blank or Swype's own name clears the rename) and/or switch on/off. The code never changes."""
-    m = db.get(SwypeMenuItem, code)
+    m = db.query(SwypeMenuItem).filter(SwypeMenuItem.code == code).one_or_none()
     if m is None:
         raise MenuItemError(f"no Swype item {code}")
     if name is not None:

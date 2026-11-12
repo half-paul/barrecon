@@ -27,7 +27,7 @@ def test_csv_fills_the_swype_menu_and_never_touches_inventory(db, location):
     r2 = swype_items.apply_csv(db, CSV.replace(b"Shrooms on Toast", b"Shrooms Toast") + b"00000006,000004,Toast Again,A\r\n",
                                "export_items2.csv", location.id)
     assert (r2["new"], r2["renamed"], r2["unchanged"]) == (1, 1, 2)
-    assert db.get(SwypeMenuItem, "00000005").name == "Shrooms Toast"
+    assert db.get(SwypeMenuItem, (db.info["business_id"], "00000005")).name == "Shrooms Toast"
 
 
 def test_sales_import_adds_menu_items_not_inventory_items(db, location):
@@ -37,7 +37,7 @@ def test_sales_import_adds_menu_items_not_inventory_items(db, location):
     assert pv["menu"]["new"] == 3 and db.query(SwypeMenuItem).count() == 0  # preview writes nothing
     r = swype_item_sales.apply(db, report(), "wk.xlsx", location.id)
     assert r["menu"]["new"] == 3
-    assert db.get(SwypeMenuItem, "00000400").category == "Draft Beer"
+    assert db.get(SwypeMenuItem, (db.info["business_id"], "00000400")).category == "Draft Beer"
     assert db.query(InventoryItem).count() == 1 and not off.is_active  # same name, still not linked or switched on
 
 
@@ -80,7 +80,7 @@ def test_unsold_line_does_not_switch_an_item_back_on(db, location):
     db.commit()
     swype_item_sales.apply(db, report("From 10/26/2026 to 11/01/2026\nAll Price Type", draft_qty=0),
                            "wk2.xlsx", location.id)
-    assert not db.get(SwypeMenuItem, "00000400").is_active
+    assert not db.get(SwypeMenuItem, (db.info["business_id"], "00000400")).is_active
 
 
 def test_suggest_item_follows_bottle_recipe_then_name(db, location):
@@ -114,7 +114,7 @@ def test_sold_counts_only_periods_overlapping_the_range(client, db, location):
 def test_items_unsold_for_a_month_are_switched_off(db, location):
     import datetime as _d
     swype_items.apply_csv(db, CSV, "export_items.csv", location.id)
-    db.get(SwypeMenuItem, "00000005").created_at = _d.datetime(2026, 8, 1, tzinfo=_d.timezone.utc)  # long on the menu
+    db.get(SwypeMenuItem, (db.info["business_id"], "00000005")).created_at = _d.datetime(2026, 8, 1, tzinfo=_d.timezone.utc)  # long on the menu
     db.commit()
     sep = swype_item_sales.apply(db, report("From 09/01/2026 to 09/30/2026\nAll Price Type"), "sep.xlsx", location.id)
     assert sep["menu"]["deactivated"] == 0  # sales do not reach back a month yet
@@ -128,4 +128,4 @@ def test_items_unsold_for_a_month_are_switched_off(db, location):
     assert active["00000330_01"] and active["00000330_02"]
 
     nov = swype_item_sales.apply(db, report("From 11/01/2026 to 11/01/2026\nAll Price Type"), "nov.xlsx", location.id)
-    assert nov["menu"]["reactivated"] == 1 and db.get(SwypeMenuItem, "00000400").is_active
+    assert nov["menu"]["reactivated"] == 1 and db.get(SwypeMenuItem, (db.info["business_id"], "00000400")).is_active

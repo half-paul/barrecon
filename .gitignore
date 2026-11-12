@@ -18,3 +18,6 @@ venv/
 # Raw Swype exports (real sales data, regenerable)
 scripts/csv_export_api/*.csv
 scripts/csv_export_api/*.xlsx
+
+# Database dumps (real bar data)
+*.sql.gz

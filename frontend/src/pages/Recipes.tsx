@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type ImportSummary, type Item, type MatchQueue, type MatchRow, type MenuRow, type Recipe, type RecipeLine, day, groupBy, n } from "../lib/api";
+import { api, type ImportSummary, type Item, type MatchQueue, type MatchRow, type MenuRow, type Recipe, type RecipeLine, type RecipeLineItem, day, groupBy, n } from "../lib/api";
 import { useReadOnly } from "../lib/auth";
 import { Button, Combobox, Empty, Field, FileButton, Flash, Lightbox, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
 
@@ -10,13 +10,16 @@ type Tab = (typeof TABS)[number];
 const UNITS = ["oz", "ml", "dash", "each", "g", "l", "cl"];
 const pack = (l: Pick<RecipeLine, "pack_name">) => l.pack_name || "pack";
 
-/** "75 ml · 0.10 bottle" for one portion in the item's own unit. */
+/** "75 ml · 0.10 bottle" for one portion in the item’s own unit. */
 function portionText(l: RecipeLine) {
   if (l.stock_qty == null) return null;
   const same = l.unit === l.stock_unit;
   const packs = l.packs != null && Number(l.pack_size) > 1 ? `${n(l.packs, 3)} ${pack(l)}` : null;
   return [same ? null : `${n(l.stock_qty, 1)} ${l.stock_unit}`, packs].filter(Boolean).join(" · ");
 }
+
+/** "Box A or Box B or Box C": the items a portion can come out of, any one of them. */
+const itemsText = (l: RecipeLine) => l.items.map((x) => x.item_name).join(" or ");
 
 /** Made rather than poured: two or more stock items, or preparation steps around a single one. */
 const isMade = (r: Recipe) => r.lines.length > 1 || !!r.steps?.trim();
@@ -53,7 +56,7 @@ export default function Recipes() {
   const todo = queue.data?.rows ?? [];
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const hit = (fields: (string | null | undefined)[]) => words.every((w) => fields.some((f) => f?.toLowerCase().includes(w)));
-  const found = all.filter((r) => r.recipe && hit([r.name, r.code, r.category, r.recipe.steps, r.recipe.notes, ...r.recipe.lines.map((l) => l.item_name)]));
+  const found = all.filter((r) => r.recipe && hit([r.name, r.code, r.category, r.recipe.steps, r.recipe.notes, ...r.recipe.lines.flatMap((l) => l.items.map((x) => x.item_name))]));
   const linked = found.filter((r) => !r.recipe!.ignored);
   const made = linked.filter((r) => isMade(r.recipe!));
   const direct = linked.filter((r) => !isMade(r.recipe!));
@@ -71,8 +74,8 @@ export default function Recipes() {
     setBusy(true);
     try {
       const r = await api.upload<ImportSummary>("/api/recipes/import", f);
-      const warn = r.rows.filter((x) => x.message.includes("can't be converted")).length;
-      if (r.status === "ok") saved(`Imported ${f.name}: ${r.inserted} new, ${r.updated} updated recipes.${warn ? ` ${warn} use items counted in 'each', so their portions can't be converted until the item's unit is fixed on Stock items.` : ""}`);
+      const warn = r.rows.filter((x) => x.message.includes("can’t be converted")).length;
+      if (r.status === "ok") saved(`Imported ${f.name}: ${r.inserted} new, ${r.updated} updated recipes.${warn ? ` ${warn} use items counted in 'each', so their portions can’t be converted until the item’s unit is fixed on Stock items.` : ""}`);
       else error(`Nothing imported. ${r.rows.map((x) => x.message).join(" · ")}`);
       items.reload();
     } catch (e) { error((e as Error).message); } finally { setBusy(false); }
@@ -105,7 +108,7 @@ export default function Recipes() {
 
 function Seg<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, string][] }) {
   return (
-    <div className="inline-flex flex-wrap rounded-[10px] border border-line overflow-hidden text-sm" role="group">
+    <div className="inline-flex flex-wrap rounded-control border border-line overflow-hidden text-sm" role="group">
       {options.map(([k, label]) => <button key={k} aria-pressed={value === k} onClick={() => onChange(k)}
         className={`px-3 py-1.5 ${value === k ? "bg-raised text-ink font-medium" : "bg-surface text-muted hover:text-ink"}`}>{label}</button>)}
     </div>
@@ -128,9 +131,10 @@ function Portions({ r }: { r: MenuRow }) {
   return (<>
     {r.recipe.ignored ? <span className="text-muted text-sm">takes no tracked stock</span>
       : <ul className="text-sm space-y-0.5">{r.recipe.lines.map((l, i) => (
-          <li key={i}><span className="num">{n(l.qty, 2)} {l.unit}</span> {l.item_name}
-            {l.error ? <span className="text-danger text-xs"> · can't convert to {l.stock_unit}</span>
-              : portionText(l) && <span className="text-faint text-xs"> · {portionText(l)}</span>}</li>))}</ul>}
+          <li key={i}><span className="num">{n(l.qty, 2)} {l.unit}</span> {itemsText(l)}
+            {l.items.length > 1 && <span className="ml-1.5 rounded-full bg-accent/10 text-accent text-[11px] px-1.5 py-px align-middle">any one</span>}
+            {l.error ? <span className="text-danger text-xs"> · {l.items.length > 1 ? l.error : `can’t convert to ${l.stock_unit}`}</span>
+              : l.items.length === 1 && portionText(l) && <span className="text-faint text-xs"> · {portionText(l)}</span>}</li>))}</ul>}
     {r.recipe.versions.length > 1 && <div className="text-xs text-faint">since {day(r.recipe.effective_from)} · {r.recipe.versions.length} versions</div>}
     {r.recipe.notes && <div className="mt-1.5 border-l-2 border-accent/60 pl-2 text-xs text-muted whitespace-pre-line max-w-md">{r.recipe.notes}</div>}
   </>);
@@ -143,10 +147,10 @@ function RecipeList({ rows, empty, editing, setEditing, onPhoto, items, onSaved,
     <div className="flex flex-col gap-6">
       {groupBy(rows, (r) => r.category ?? "Other").map(([cat, list]) => (
         <section key={cat}>
-          <h2 className="label-caps mb-2 px-1">{cat}</h2>
-          <ul className="card">{list.map((r) => (
+          <h2 className="text-sm font-semibold mb-1">{cat}</h2>
+          <ul className="border-t border-line-strong">{list.map((r) => (
             <li key={r.code} className="border-b border-line last:border-0">
-              <div className="grid gap-x-4 gap-y-1.5 p-3 items-start md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_5rem_auto]">
+              <div className="grid gap-x-4 gap-y-1.5 py-3 items-start md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_5rem_auto]">
                 <div className="flex items-start gap-2.5 min-w-0"><Thumb row={r} onPhoto={onPhoto} /><div className="min-w-0">{r.name}<div className="text-xs text-faint mono">{r.code}</div></div></div>
                 <div><Portions r={r} /></div>
                 <div className="text-sm text-muted md:text-right"><span className="num">{n(r.sold, 0)}</span> sold</div>
@@ -159,7 +163,7 @@ function RecipeList({ rows, empty, editing, setEditing, onPhoto, items, onSaved,
   );
 }
 
-/** A Swype item that hasn't sold yet, so it isn't on any tab: name it, then write its recipe. */
+/** A Swype item that hasn’t sold yet, so it isn’t on any tab: name it, then write its recipe. */
 function AddItem({ items, onSaved, onError }: { items: Item[]; onSaved: (t: string) => void; onError: (t: string) => void }) {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
@@ -178,17 +182,18 @@ function AddItem({ items, onSaved, onError }: { items: Item[]; onSaved: (t: stri
 const blankRow = (code: string, name: string, category: string | null) =>
   ({ code, name, department: null, category, sold: 0, weeks: 0, last_sold: null, suggested_item: null, recipe: null }) as MenuRow;
 
-type Draft = { item: string; qty: string; unit: string };
+/** One portion: `items` are the stock items it can come out of (one, or any one of several). */
+type Draft = { items: string[]; qty: string; unit: string };
 
 function Editor({ row, seed, items, onSaved, onError, onPhoto }: { row: MenuRow; seed?: Draft[]; items: Item[]; onSaved: (t: string) => void; onError: (t: string) => void;
   onPhoto?: (r: MenuRow) => void }) {
   const viewOnly = useReadOnly();
-  const label = (it: Item) => `${it.name} — ${it.sku}`;
+  const label = (it: Item) => `${it.name} (${it.sku})`;
   const byLabel = useMemo(() => new Map(items.map((it) => [label(it), it])), [items]);
   const itemLabels = useMemo(() => [...byLabel.keys()], [byLabel]);
   const byId = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
-  const start: Draft[] = row.recipe?.lines.map((l) => ({ item: byId.get(l.item_id) ? label(byId.get(l.item_id)!) : l.item_name, qty: String(Number(l.qty)), unit: l.unit }))
-    ?? seed ?? (row.suggested_item && byId.get(row.suggested_item.id) ? [{ item: label(byId.get(row.suggested_item.id)!), qty: "", unit: "oz" }] : [{ item: "", qty: "", unit: "oz" }]);
+  const start: Draft[] = row.recipe?.lines.map((l) => ({ items: l.items.map((x) => byId.get(x.item_id) ? label(byId.get(x.item_id)!) : x.item_name), qty: String(Number(l.qty)), unit: l.unit }))
+    ?? seed ?? (row.suggested_item && byId.get(row.suggested_item.id) ? [{ items: [label(byId.get(row.suggested_item.id)!)], qty: "", unit: "oz" }] : [{ items: [""], qty: "", unit: "oz" }]);
   const [lines, setLines] = useState<Draft[]>(start);
   const [ignored, setIgnored] = useState(row.recipe?.ignored ?? false);
   const [steps, setSteps] = useState(row.recipe?.steps ?? "");
@@ -198,14 +203,22 @@ function Editor({ row, seed, items, onSaved, onError, onPhoto }: { row: MenuRow;
   const [from, setFrom] = useState(new Date().toLocaleDateString("en-CA"));
   const [busy, setBusy] = useState(false);
   const set = (i: number, p: Partial<Draft>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...p } : l)));
+  const setItem = (i: number, k: number, v: string) => setLines((ls) => ls.map((l, j) => j !== i ? l : {
+    ...l, items: l.items.map((x, m) => (m === k ? v : x)), ...(k === 0 && byLabel.get(v)?.stock_unit === "each" ? { unit: "each" } : {}) }));
 
   const save = async () => {
     const out = [];
     for (const l of ignored ? [] : lines) {
-      if (!l.item && !l.qty) continue;
-      const it = byLabel.get(l.item);
-      if (!it) return onError(`Pick "${l.item || "an ingredient"}" from the list of stock items.`);
-      out.push({ item_id: it.id, qty: l.qty, unit: l.unit });
+      const picked = l.items.filter((x) => x.trim());
+      if (!picked.length && !l.qty) continue;
+      if (!picked.length) return onError("Pick an ingredient from the list of stock items.");
+      const ids = [];
+      for (const x of picked) {
+        const it = byLabel.get(x);
+        if (!it) return onError(`Pick "${x}" from the list of stock items.`);
+        ids.push(it.id);
+      }
+      out.push({ item_ids: ids, qty: l.qty, unit: l.unit });
     }
     setBusy(true);
     try {
@@ -233,19 +246,32 @@ function Editor({ row, seed, items, onSaved, onError, onPhoto }: { row: MenuRow;
     <div className="p-3 flex flex-col gap-3">
       {!ignored && (<>
         {lines.map((l, i) => {
-          const it = byLabel.get(l.item);
+          const it = byLabel.get(l.items[0]);
+          const many = l.items.length > 1;
           return (
-            <div key={i} className="flex flex-wrap items-center gap-2">
-              <Combobox className="w-full sm:w-80" options={itemLabels} placeholder="Stock item" aria-label="Stock item" value={l.item} onChange={(v) => set(i, { item: v, ...(byLabel.get(v)?.stock_unit === "each" ? { unit: "each" } : {}) })} />
-              <input className={`${inputCls} w-20 num text-right`} placeholder="qty" value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} aria-label="Portion" />
-              <select className={inputCls} value={l.unit} onChange={(e) => set(i, { unit: e.target.value })} aria-label="Unit">{UNITS.map((u) => <option key={u}>{u}</option>)}</select>
-              {it && <span className="text-xs text-faint">counted in {it.stock_unit}{Number(it.pack_size) > 1 ? `, ${n(it.pack_size, 0)} ${it.stock_unit} per ${it.pack_name || "pack"}` : ""}</span>}
-              <button className="text-xs text-muted hover:text-danger underline" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>remove</button>
+            <div key={i} className={`flex flex-col gap-1.5 ${many ? "border-l-2 border-accent/50 pl-2" : ""}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Combobox className="w-full sm:w-80" options={itemLabels} placeholder="Stock item" aria-label="Stock item" value={l.items[0]} onChange={(v) => setItem(i, 0, v)} />
+                <input className={`${inputCls} w-20 num text-right`} placeholder="qty" value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} aria-label="Portion" />
+                <select className={inputCls} value={l.unit} onChange={(e) => set(i, { unit: e.target.value })} aria-label="Unit">{UNITS.map((u) => <option key={u}>{u}</option>)}</select>
+                {it && !many && <span className="text-xs text-faint">counted in {it.stock_unit}{Number(it.pack_size) > 1 ? `, ${n(it.pack_size, 0)} ${it.stock_unit} per ${it.pack_name || "pack"}` : ""}</span>}
+                <button className="text-xs text-muted hover:text-danger underline" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>remove</button>
+              </div>
+              {l.items.slice(1).map((x, k) => (
+                <div key={k} className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted w-6 text-right">or</span>
+                  <Combobox className="w-full sm:w-[18.5rem]" options={itemLabels} placeholder="Another stock item" aria-label="Alternative stock item" value={x} onChange={(v) => setItem(i, k + 1, v)} />
+                  <button className="text-xs text-muted hover:text-danger underline" onClick={() => set(i, { items: l.items.filter((_, m) => m !== k + 1) })}>remove</button>
+                </div>))}
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <button className="underline text-muted hover:text-ink" onClick={() => set(i, { items: [...l.items, ""] })}>+ or another item</button>
+                {many && <span className="text-faint">Poured from any one of these. Stock vs sales checks them together.</span>}
+              </div>
             </div>);
         })}
-        <div><button className="text-sm underline text-muted hover:text-ink" onClick={() => setLines((ls) => [...ls, { item: "", qty: "", unit: "oz" }])}>+ add stock item</button></div>
+        <div><button className="text-sm underline text-muted hover:text-ink" onClick={() => setLines((ls) => [...ls, { items: [""], qty: "", unit: "oz" }])}>+ add stock item</button></div>
       </>)}
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={ignored} onChange={(e) => setIgnored(e.target.checked)} /> Takes no stock (leave it out of Variance)</label>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={ignored} onChange={(e) => setIgnored(e.target.checked)} /> Takes no stock (leave it out of Stock vs sales)</label>
       <details className="text-sm">
         <summary className="text-muted cursor-pointer select-none py-1">Steps, notes and photo</summary>
         <div className="flex flex-col gap-3 pt-2">
@@ -275,7 +301,7 @@ function Editor({ row, seed, items, onSaved, onError, onPhoto }: { row: MenuRow;
 }
 
 type MatchDraft = { on: boolean; noStock: boolean; changing: boolean; item: string; qty: string; unit: string };
-const itemLabel = (it: { name: string; sku: string }) => `${it.name} — ${it.sku}`;
+const itemLabel = (it: { name: string; sku: string }) => `${it.name} (${it.sku})`;
 
 /** Everything sold with no recipe, split into what can be approved as it stands and what needs a person. */
 function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError }: Shared & { rows: MatchRow[]; foodCoffee: number }) {
@@ -303,7 +329,7 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
   const approve = () => act(async () => {
     const body = chosen.map((r) => {
       const d = draft(r);
-      const lines = d.noStock ? [] : r.lines.length > 1 ? r.lines.map((l) => ({ item_id: l.id, qty: l.qty, unit: l.unit })) : [{ item_id: byLabel.get(d.item)!.id, qty: d.qty, unit: d.unit }];
+      const lines = d.noStock ? [] : r.lines.length > 1 ? r.lines.map((l) => ({ item_ids: l.item_ids ?? [l.id], qty: l.qty, unit: l.unit })) : [{ item_id: byLabel.get(d.item)!.id, qty: d.qty, unit: d.unit }];
       return { code: r.code, name: r.name, lines, ignored: d.noStock };
     });
     const x = await api.post<{ saved: number }>("/api/recipes/match/approve", { rows: body });
@@ -321,7 +347,7 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
           <div className="min-w-0">{r.name}{r.check && <span className="block text-xs text-amber">{r.check}</span>}</div>
           <div className="col-start-2 md:col-start-auto min-w-0">
             {d.noStock ? <span className="text-sm text-muted">Takes no stock</span>
-              : r.lines.length > 1 ? <span className="text-sm">{r.lines.map((l) => `${n(l.qty, 2)} ${l.unit} ${l.name}`).join(", ")}</span>
+              : r.lines.length > 1 ? <span className="text-sm">{r.lines.map((l) => `${n(l.qty, 2)} ${l.unit} ${[l, ...(l.options ?? [])].map((x) => x.name).join(" or ")}`).join(", ")}</span>
               : !edit ? <span className="text-sm"><span className="num">{d.qty} {d.unit}</span> {byLabel.get(d.item)?.name ?? d.item}</span>
               : (<>
                 <div className="flex items-center gap-2">
@@ -340,7 +366,7 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
           </div>
         </div>
         {editing === r.code && <div className="border-t border-line bg-paper"><Editor row={blankRow(r.code, r.name, r.category)} items={items} onSaved={onSaved} onError={onError}
-          seed={r.lines.map((l) => ({ item: itemLabel(l), qty: l.qty == null ? "" : String(Number(l.qty)), unit: l.unit }))} /></div>}
+          seed={r.lines.map((l) => ({ items: [l, ...(l.options ?? [])].map(itemLabel), qty: l.qty == null ? "" : String(Number(l.qty)), unit: l.unit }))} /></div>}
       </li>);
   };
 
@@ -364,24 +390,25 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
 
 /** Reverse view: each inventory item, and every sold item that pours from it. */
 function ByIngredient({ rows }: { rows: MenuRow[] }) {
-  const m = new Map<string, { name: string; line: RecipeLine; uses: { row: MenuRow; line: RecipeLine }[] }>();
-  for (const r of rows) for (const l of r.recipe?.lines ?? []) {
-    if (!m.has(l.item_id)) m.set(l.item_id, { name: l.item_name, line: l, uses: [] });
-    m.get(l.item_id)!.uses.push({ row: r, line: l });
+  const m = new Map<string, { name: string; line: RecipeLineItem; uses: { row: MenuRow; line: RecipeLine; part: RecipeLineItem }[] }>();
+  for (const r of rows) for (const l of r.recipe?.lines ?? []) for (const x of l.items) {
+    if (!m.has(x.item_id)) m.set(x.item_id, { name: x.item_name, line: x, uses: [] });
+    m.get(x.item_id)!.uses.push({ row: r, line: l, part: x });
   }
   const list = [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
   if (list.length === 0) return <Empty>No recipes here yet.</Empty>;
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-x-8 md:grid-cols-2 xl:grid-cols-3">
       {list.map((g) => {
-        const total = g.uses.reduce((t, u) => t + Number(u.line.stock_qty ?? 0) * Number(u.row.sold), 0);
+        const total = g.uses.reduce((t, u) => t + (u.line.items.length > 1 ? 0 : Number(u.part.stock_qty ?? 0) * Number(u.row.sold)), 0);
+        const shared = g.uses.some((u) => u.line.items.length > 1);
         return (
-          <section key={g.line.item_id} className="card p-4">
+          <section key={g.line.item_id} className="border-t border-line-strong py-3">
             <h3 className="font-semibold">{g.name}</h3>
             <p className="text-xs text-faint mb-2">{g.uses.length} sold items · {n(total, 0)} {g.line.stock_unit} over the weeks on file
-              {Number(g.line.pack_size) > 1 && ` (${n(total / Number(g.line.pack_size), 1)} ${pack(g.line)})`}</p>
+              {Number(g.line.pack_size) > 1 && ` (${n(total / Number(g.line.pack_size), 1)} ${pack(g.line)})`}{shared && ", plus portions shared with other items"}</p>
             <ul className="text-sm space-y-0.5">{g.uses.sort((a, b) => Number(b.row.sold) - Number(a.row.sold)).map((u) => (
-              <li key={u.row.code} className="flex justify-between gap-2"><span>{u.row.name}</span><span className="num text-muted shrink-0">{n(u.line.qty, 2)} {u.line.unit}</span></li>))}</ul>
+              <li key={u.row.code} className="flex justify-between gap-2"><span>{u.row.name}{u.line.items.length > 1 && <span className="text-xs text-faint"> · or {u.line.items.filter((x) => x.item_id !== u.part.item_id).map((x) => x.item_name).join(" or ")}</span>}</span><span className="num text-muted shrink-0">{n(u.line.qty, 2)} {u.line.unit}</span></li>))}</ul>
           </section>);
       })}
     </div>

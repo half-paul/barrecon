@@ -27,7 +27,7 @@ def read_as(monkeypatch):
     """Stand in for Claude: the next receipt reads as `data`."""
     box = {"data": RECEIPT}
     monkeypatch.setattr(receipts, "enabled", lambda: True)
-    monkeypatch.setattr(receipts, "read", lambda data, ctype: box["data"])
+    monkeypatch.setattr(receipts, "read", lambda data, ctype, meter=None: box["data"])
     return box
 
 
@@ -120,7 +120,7 @@ def test_totals_check_and_duplicate(client, read_as):
 
 
 def test_unreadable_receipt_still_makes_a_draft(client, monkeypatch):
-    def fail(data, ctype):
+    def fail(data, ctype, meter=None):
         raise receipts.ReceiptReadError("couldn't reach Claude")
     monkeypatch.setattr(receipts, "read", fail)
     d = upload(client)

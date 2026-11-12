@@ -2,14 +2,15 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
-from .. import audit, auth
+from .. import audit, auth, tenancy
 from ..config import settings
 from ..db import get_db
-from ..models import AuditChange, AuditEvent, User, utcnow
+from ..models import AuditChange, AuditEvent, BusinessMember, Location, Tenant, User, utcnow
 from ..schemas import AuditOut, PasswordResetIn, PinSetIn, UserIn, UserOut, UserPatch
+from ..services import logins, mail
 
 router = APIRouter(prefix="/api/users", tags=["users"], dependencies=[auth.Admin])
 audit_router = APIRouter(prefix="/api/audit", tags=["audit"], dependencies=[auth.perm("audit")])
@@ -28,9 +29,42 @@ def _clean_permissions(p: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def _access(db: Session, u: User) -> dict[str, dict[str, str]]:
+    return {m.location_id: dict(m.permissions or {}) for m in db.query(BusinessMember).filter(BusinessMember.user_id == u.id)}
+
+
+def _set_access(db: Session, u: User, access: dict[str, dict[str, str]]) -> None:
+    """Replace every membership: the businesses listed, with these levels, and no others."""
+    have = {m.location_id: m for m in db.query(BusinessMember).filter(BusinessMember.user_id == u.id)}
+    for bid, perms in access.items():
+        if not db.get(Location, bid):  # only businesses of this tenant are visible here (app.tenancy)
+            raise HTTPException(422, "Unknown business.")
+        clean = _clean_permissions(perms)
+        if bid in have:
+            have[bid].permissions = clean
+        else:
+            db.add(BusinessMember(user_id=u.id, location_id=bid, permissions=clean))
+    for bid, m in have.items():
+        if bid not in access:
+            db.delete(m)
+
+
+def _set_here(db: Session, u: User, perms: dict[str, str]) -> None:
+    """Levels in the business the admin is working in; the user becomes a member of it."""
+    bid = tenancy.business_id(db)
+    m = db.get(BusinessMember, (u.id, bid))
+    if m:
+        m.permissions = _clean_permissions(perms)
+    else:
+        db.add(BusinessMember(user_id=u.id, location_id=bid, permissions=_clean_permissions(perms)))
+
+
 def _out(u: User, db: Session) -> UserOut:
-    return UserOut.model_validate(u).model_copy(update={"permissions": u.permissions or {}, "has_pin": bool(u.pin_hash),
-                                                        "locked": auth.is_locked(db, u)})
+    access = _access(db, u)
+    return UserOut.model_validate(u).model_copy(update={"permissions": access.get(db.info.get("business_id") or "", {}), "access": access,
+                                                        "has_pin": bool(u.pin_hash),
+                                                        "locked": auth.is_locked(db, u), "mfa_enabled": bool(u.totp_enabled_at),
+                                                        "invite_pending": u.password_hash == auth.INVITED})
 
 
 def _get(db: Session, user_id: str) -> User:
@@ -41,10 +75,24 @@ def _get(db: Session, user_id: str) -> User:
 
 
 def _taken(db: Session, username: str, not_id: str | None = None) -> bool:
-    q = db.query(User).filter(User.username == username)
+    q = db.query(User).filter(User.username == username)  # across every tenant: one login page for all
     if not_id:
         q = q.filter(User.id != not_id)
-    return db.query(q.exists()).scalar()
+    return q.execution_options(unscoped=True).first() is not None
+
+
+def _email_taken(db: Session, email: str, not_id: str | None = None) -> bool:
+    q = db.query(User).filter(User.email == email)
+    if not_id:
+        q = q.filter(User.id != not_id)
+    return q.execution_options(unscoped=True).first() is not None
+
+
+def _send_invite(db: Session, u: User) -> bool:
+    logins.revoke(db, u, "invite")
+    token = logins.issue(db, u, "invite")
+    db.commit()
+    return mail.try_send(u.email, *mail.invite(u, token))
 
 
 def _other_admins(db: Session, user_id: str) -> int:
@@ -61,12 +109,28 @@ def create_user(body: UserIn, db: Session = Depends(get_db)):
     name = body.username.strip().lower()
     if _taken(db, name):
         raise HTTPException(409, f"The username {name} is taken.")
-    auth.check_password(body.password, name, body.display_name)
-    u = User(username=name, display_name=body.display_name.strip(), password_hash=auth.hash_password(body.password),
-             is_admin=body.is_admin, permissions=_clean_permissions(body.permissions))
+    email = body.email.strip().lower() if body.email else None
+    if email and _email_taken(db, email):
+        raise HTTPException(409, f"{email} is already on another login.")
+    if body.password:
+        auth.check_password(body.password, name, body.display_name)
+    elif not mail.enabled():
+        raise HTTPException(409, "Email isn't set up, so an invite can't be sent. Give them a password instead.")
+    t = db.get(Tenant, db.info.get("tenant_id"))
+    if t and t.max_users is not None and db.query(User).filter(User.is_active.is_(True)).count() >= t.max_users:
+        raise HTTPException(409, f"This account is limited to {t.max_users} active logins. Switch one off first, or ask for a higher limit.")
+    u = User(username=name, display_name=body.display_name.strip(), email=email,
+             password_hash=auth.hash_password(body.password) if body.password else auth.INVITED,
+             is_admin=body.is_admin, permissions={})
     db.add(u)
+    db.flush()
+    if body.access is not None:
+        _set_access(db, u, body.access)
+    elif db.info.get("business_id"):
+        _set_here(db, u, body.permissions)
     db.commit()
-    return _out(u, db)
+    sent = None if body.password else _send_invite(db, u)
+    return _out(u, db).model_copy(update={"invite_sent": sent})
 
 
 @router.patch("/{user_id}", response_model=UserOut)
@@ -85,11 +149,24 @@ def update_user(user_id: str, body: UserPatch, me: User = auth.Admin, db: Sessio
         u.username = name
     if ch.get("display_name"):
         u.display_name = ch["display_name"].strip()
+    if "email" in ch:
+        email = (ch["email"] or "").strip().lower() or None
+        if email and _email_taken(db, email, u.id):
+            raise HTTPException(409, f"{email} is already on another login.")
+        if email != u.email:  # links already sent to the old address stop working
+            u.email = email
+            logins.revoke(db, u, "invite", "reset", "mfa_email")
     if ch.get("is_admin") is not None:
         u.is_admin = ch["is_admin"]
-    if ch.get("permissions") is not None:
-        u.permissions = _clean_permissions(ch["permissions"])
+    if ch.get("access") is not None:
+        _set_access(db, u, ch["access"])
+    elif ch.get("permissions") is not None:
+        _set_here(db, u, ch["permissions"])
     if ch.get("is_active") is not None and ch["is_active"] != u.is_active:
+        if ch["is_active"]:
+            t = db.get(Tenant, db.info.get("tenant_id"))
+            if t and t.max_users is not None and db.query(User).filter(User.is_active.is_(True)).count() >= t.max_users:
+                raise HTTPException(409, f"This account is limited to {t.max_users} active logins.")
         u.is_active = ch["is_active"]
         if not u.is_active:
             u.session_version += 1  # logged out everywhere
@@ -105,7 +182,33 @@ def reset_password(user_id: str, body: PasswordResetIn, db: Session = Depends(ge
     u.password_hash = auth.hash_password(body.password)
     u.password_changed_at = utcnow()
     u.session_version += 1
+    logins.revoke(db, u, "invite", "reset")
     db.commit()
+    return _out(u, db)
+
+
+@router.post("/{user_id}/invite", response_model=UserOut)
+def resend_invite(user_id: str, db: Session = Depends(get_db)):
+    """A fresh link; the earlier one stops working."""
+    u = _get(db, user_id)
+    if u.password_hash != auth.INVITED:
+        raise HTTPException(409, f"{u.display_name} has already chosen a password.")
+    if not u.email or not mail.enabled():
+        raise HTTPException(409, "An invite needs an email address, and email set up on the server.")
+    return _out(u, db).model_copy(update={"invite_sent": _send_invite(db, u)})
+
+
+@router.post("/{user_id}/mfa/reset", response_model=UserOut)
+def reset_mfa(user_id: str, me: User = auth.Admin, db: Session = Depends(get_db)):
+    """Someone lost their phone and their recovery codes. They set up a new authenticator at their next login."""
+    u = _get(db, user_id)
+    if u.id == me.id:
+        raise HTTPException(409, "Use My account for your own authenticator.")
+    logins.clear_mfa(u)
+    u.session_version += 1
+    db.commit()
+    if u.email and mail.enabled():
+        mail.try_send(u.email, *mail.notice(u, f"{me.display_name} reset your two-step login. You'll set it up again at your next login."))
     return _out(u, db)
 
 
@@ -150,17 +253,17 @@ def _local_start(d: date) -> datetime:
 
 
 @audit_router.get("/users")
-def audit_users(db: Session = Depends(get_db)):
-    """Everyone, for the audit log's user filter."""
+def audit_users(db: Session = Depends(get_db), me: User = auth.Auth):
+    """For the audit log's person filter: the people who can work in this business (its members and the tenant's admins)."""
+    members = db.query(BusinessMember.user_id).filter(BusinessMember.location_id == me.session_business)
+    people = db.query(User).filter(User.tenant_id == me.tenant_id, or_(User.is_admin.is_(True), User.id.in_(members)))
     return [{"id": u.id, "username": u.username, "display_name": u.display_name, "is_active": u.is_active}
-            for u in db.query(User).order_by(func.lower(User.display_name))]
+            for u in people.order_by(func.lower(User.display_name))]
 
 
-@audit_router.get("")
-def list_events(db: Session = Depends(get_db), user_id: str | None = None, area: str | None = None,
-                action: str | None = None, date_from: date | None = None, date_to: date | None = None,
-                q: str | None = None, limit: int = 100, offset: int = 0):
-    query = db.query(AuditEvent)
+def event_filters(query, user_id: str | None = None, area: str | None = None, action: str | None = None,
+                  date_from: date | None = None, date_to: date | None = None, q: str | None = None):
+    """The audit log's filters, shared by a business's log and the platform console's."""
     if user_id:
         query = query.filter(AuditEvent.user_id == user_id)
     if area:
@@ -174,14 +277,38 @@ def list_events(db: Session = Depends(get_db), user_id: str | None = None, area:
     if q:
         like = f"%{q.strip()}%"
         query = query.filter(or_(AuditEvent.path.ilike(like), AuditEvent.route.ilike(like), AuditEvent.username.ilike(like)))
-    total = query.count()
-    rows = query.order_by(AuditEvent.at.desc()).offset(max(offset, 0)).limit(min(max(limit, 1), 500)).all()
+    return query
+
+
+def events_out(db: Session, rows: list[AuditEvent], links: bool = True) -> list[AuditOut]:
     n = audit.count_changes(db, [r.id for r in rows])
     out = []
     for r in rows:
         label, link = audit.describe(r)
-        out.append(AuditOut.model_validate(r).model_copy(update={"label": label, "link": link, "changes": n.get(r.id, 0)}))
-    return {"total": total, "events": out}
+        out.append(AuditOut.model_validate(r).model_copy(update={"label": label, "link": link if links else None, "changes": n.get(r.id, 0)}))
+    return out
+
+
+def _here(me: User):
+    """What one business's audit log holds: what was done while working in that business. A tenant admin also sees
+    the tenant's entries that belong to no business (a failed login, a password reset by email), whichever business
+    they are in, since those would otherwise show nowhere but the platform console."""
+    mine = AuditEvent.location_id == me.session_business
+    if auth.is_admin(me):
+        mine = or_(mine, AuditEvent.location_id.is_(None))
+    return and_(AuditEvent.tenant_id == me.tenant_id, mine)
+
+
+@audit_router.get("")
+def list_events(db: Session = Depends(get_db), user_id: str | None = None, area: str | None = None,
+                action: str | None = None, date_from: date | None = None, date_to: date | None = None,
+                q: str | None = None, limit: int = 100, offset: int = 0, me: User = auth.Auth):
+    """The audit log of the business being worked in, for everyone including tenant admins: another business's log
+    is read by switching to it. Every tenant and business together is the platform console's log."""
+    query = event_filters(db.query(AuditEvent).filter(_here(me)), user_id, area, action, date_from, date_to, q)
+    total = query.count()
+    rows = query.order_by(AuditEvent.at.desc()).offset(max(offset, 0)).limit(min(max(limit, 1), 500)).all()
+    return {"total": total, "events": events_out(db, rows)}
 
 
 @audit_router.get("/verify")
@@ -191,6 +318,9 @@ def verify(db: Session = Depends(get_db)):
 
 
 @audit_router.get("/{event_id}/changes")
-def changes(event_id: str, db: Session = Depends(get_db)):
+def changes(event_id: str, db: Session = Depends(get_db), me: User = auth.Auth):
+    ev = db.query(AuditEvent).filter(AuditEvent.id == event_id, _here(me)).first()
+    if not ev:
+        raise HTTPException(404, "entry not found")
     rows = db.query(AuditChange).filter(AuditChange.event_id == event_id).order_by(AuditChange.position).all()
     return [{"table": c.table_name, "row_id": c.row_id, "op": c.op, "changes": c.changes} for c in rows]

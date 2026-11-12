@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Group, type ImportSummary, type Item, groupBy, n } from "../lib/api";
 import { useReadOnly } from "../lib/auth";
-import { Button, Empty, Field, FileButton, Flash, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
+import { Button, Empty, Field, FileButton, Flash, inputCls, Loading, Nil, Notice, Page, useAsync } from "../lib/ui";
 
 type Units = { code: string; dimension: string }[];
 const blank = { sku: "", name: "", category: "Spirits", stock_unit: "ml", pack_name: "bottle", pack_size: "750", case_size: "12", pack_cost: "", par_level: "" };
@@ -100,7 +100,7 @@ export default function Items() {
       {all.length > 0 && (<>
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <input className={`${inputCls} w-full sm:w-72`} placeholder="Filter by name, SKU or group" aria-label="Filter items" value={q} onChange={(e) => setParam("q", e.target.value)} />
-          <div className="inline-flex rounded-[10px] border border-line overflow-hidden text-sm" role="group" aria-label="Status">
+          <div className="inline-flex rounded-control border border-line overflow-hidden text-sm" role="group" aria-label="Status">
             {([["active", "Active"], ["off", "Switched off"], ["all", "All"]] as const).map(([k, label]) => (
               <button key={k} aria-pressed={status === k} onClick={() => setParam("status", k)}
                 className={`px-3 py-1.5 ${status === k ? "bg-raised text-ink font-medium" : "bg-surface text-muted hover:text-ink"}`}>
@@ -121,7 +121,7 @@ export default function Items() {
       {all.length > 0 && shownCount === 0 && (
         <Empty>No items match. <button className="underline" onClick={() => setParams({ status: "all" }, { replace: true })}>Clear filters</button></Empty>)}
       {shownCount > 0 && (
-        <div className="card table-box px-2"><table className="grid">
+        <div className="table-box"><table className="grid">
           <thead><tr><th>SKU</th><th>Item</th><th>Group</th><th>Pack</th><th className="r">Pack size</th><th className="r">Per case</th><th className="r">Cost / pack</th><th className="r">Par</th><th className="r">Last count</th><th>Active</th><th /></tr></thead>
           <tbody>
             {groups.map(([c, rows]) => (
@@ -153,12 +153,12 @@ function Group({ cat, rows, editing, onEdit, onSave, open, onToggle, onOnly }: {
     <tr className="section"><td colSpan={11}>
       <div className="flex items-center gap-3">
         {onToggle ? (
-          <button className="flex items-center gap-2 uppercase tracking-[0.08em] hover:text-ink" aria-expanded={open} onClick={onToggle}>
+          <button type="button" className="flex items-center gap-2 hover:text-accent" aria-expanded={open} onClick={onToggle}>
             <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden className={`transition-transform ${open ? "rotate-90" : ""}`}><path d="M3 1l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
             {cat}</button>
         ) : <span>{cat}</span>}
-        <span className="text-faint font-normal normal-case tracking-normal">{rows.length} items · {active} active</span>
-        {onOnly && <button className="text-xs font-normal normal-case tracking-normal text-faint hover:text-ink underline" onClick={onOnly}>show only this group</button>}
+        <span className="text-faint font-normal">{rows.length} items · {active} active</span>
+        {onOnly && <button className="text-xs font-normal text-faint hover:text-ink underline" onClick={onOnly}>show only this group</button>}
       </div>
     </td></tr>
     {open && rows.map((it) => editing === it.id
@@ -176,11 +176,11 @@ function ViewRow({ it, onEdit }: { it: Item; onEdit: () => void }) {
       <td className="num text-muted">{it.sku}</td>
       <td>{it.name}</td>
       <td>{it.category || <span className="text-faint">{UNCAT}</span>}</td>
-      <td>{it.pack_name || <span className="text-faint">—</span>}</td>
+      <td>{it.pack_name || <Nil />}</td>
       <td className="r num whitespace-nowrap">{n(it.pack_size, 0)}&nbsp;<span className="text-muted">{it.stock_unit}</span></td>
       <td className="r num">{n(it.case_size, 0)}</td>
-      <td className="r num">{it.pack_cost ? n(it.pack_cost) : <span className="text-faint">—</span>}</td>
-      <td className="r num">{it.par_level ? n(it.par_level, 1) : <span className="text-faint">—</span>}</td>
+      <td className="r num">{it.pack_cost ? n(it.pack_cost) : <Nil />}</td>
+      <td className="r num">{it.par_level ? n(it.par_level, 1) : <Nil />}</td>
       <td className="r num">{lastCount(it)}</td>
       <td>{it.is_active ? "Yes" : <span className="text-faint">Off</span>}</td>
       <td className="r"><button hidden={viewOnly} className="text-sm text-muted hover:text-ink underline" aria-label={`Edit ${it.name}`} onClick={onEdit}>Edit</button></td>
@@ -222,8 +222,8 @@ function EditRow({ it, onSave, onCancel }: { it: Item; onSave: (c: Changes) => v
       <td>{input("pack_name")}</td>
       <td className="r num whitespace-nowrap">{input("pack_size", { right: true })}&nbsp;<span className="text-muted">{it.stock_unit}</span></td>
       <td className="r num">{input("case_size", { right: true })}</td>
-      <td className="r num">{input("pack_cost", { right: true, placeholder: "—" })}</td>
-      <td className="r num">{input("par_level", { right: true, placeholder: "—" })}</td>
+      <td className="r num">{input("pack_cost", { right: true, placeholder: "" })}</td>
+      <td className="r num">{input("par_level", { right: true, placeholder: "" })}</td>
       <td className="r num">{lastCount(it)}</td>
       <td><input type="checkbox" aria-label="Active" checked={active} onChange={(e) => setActive(e.target.checked)} /></td>
       <td className="r whitespace-nowrap">

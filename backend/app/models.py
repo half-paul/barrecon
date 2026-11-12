@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -23,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     text,
     true,
 )
@@ -52,11 +54,91 @@ OUTBOUND_KINDS = ("transfer_out", "supplier_return")
 EXPLAINED_KINDS = ("breakage_expired", "other_explained")
 
 
+class Tenant(Base):
+    """A customer of the platform: a company with one or more businesses and its own users. Managed from the
+    platform console (/platform). Limits left empty mean no limit."""
+    __tablename__ = "tenants"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | suspended
+    plan: Mapped[str | None] = mapped_column(String(64))
+    contact_name: Mapped[str | None] = mapped_column(String(120))
+    contact_email: Mapped[str | None] = mapped_column(String(254))
+    notes: Mapped[str | None] = mapped_column(Text)
+    max_businesses: Mapped[int | None] = mapped_column(Integer)
+    max_users: Mapped[int | None] = mapped_column(Integer)  # active logins
+    monthly_token_cap: Mapped[int | None] = mapped_column(BigInteger)  # Claude tokens (in + out) per calendar month
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+BUSINESS_KINDS = ("bar", "restaurant", "cafe", "other")
+
+
 class Location(Base):
+    """A business of a tenant (a bar, a restaurant). Everything stocked, counted, delivered and sold belongs to one
+    business through location_id; app.tenancy keeps each request inside the business it is working in."""
     __tablename__ = "locations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.id"), index=True)
     name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str | None] = mapped_column(String(32))  # one of BUSINESS_KINDS
+    address: Mapped[str | None] = mapped_column(String(300))
+    city: Mapped[str | None] = mapped_column(String(120))
+    phone: Mapped[str | None] = mapped_column(String(40))
+    email: Mapped[str | None] = mapped_column(String(254))
+    website: Mapped[str | None] = mapped_column(String(200))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    logo_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when the logo last changed; null: none
     swype_location_id: Mapped[str | None] = mapped_column(String(64))
+    # SwypePOS back office login of this business (services/swype_api.py); the password is encrypted (services/secretbox.py)
+    swype_email: Mapped[str | None] = mapped_column(String(254))
+    swype_password: Mapped[str | None] = mapped_column(Text)
+    swype_company: Mapped[str | None] = mapped_column(String(64))
+    swype_store_id: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+Business = Location
+
+
+class BusinessLogo(Base):
+    """One logo per business, kept in the database so the nightly pg_dump backs it up."""
+    __tablename__ = "business_logos"
+    location_id: Mapped[str] = mapped_column(ForeignKey("locations.id"), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(64))
+    data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class BusinessMember(Base):
+    """A user's access to one business: a level per area, as User.permissions used to hold for the single bar.
+    Tenant admins reach every business of their tenant without a row here."""
+    __tablename__ = "business_members"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    location_id: Mapped[str] = mapped_column(ForeignKey("locations.id"), primary_key=True, index=True)
+    permissions: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AiUsage(Base):
+    """One Claude API call (reading a receipt), metered for the platform console: tokens and what they cost."""
+    __tablename__ = "ai_usage"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    tenant_id: Mapped[str | None] = mapped_column(String(36))
+    location_id: Mapped[str | None] = mapped_column(String(36))
+    user_id: Mapped[str | None] = mapped_column(String(36))
+    kind: Mapped[str] = mapped_column(String(32))  # receipt
+    model: Mapped[str] = mapped_column(String(64))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)  # uncached + cache writes + cache reads
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), default=Decimal(0))
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    ref: Mapped[str | None] = mapped_column(String(64))  # the delivery it was read for
+
+    __table_args__ = (Index("ix_ai_usage_tenant_at", "tenant_id", "at"),)
 
 
 class Unit(Base):
@@ -70,7 +152,7 @@ class InventoryItem(Base):
     __tablename__ = "inventory_items"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     location_id: Mapped[str | None] = mapped_column(ForeignKey("locations.id"))
-    sku: Mapped[str] = mapped_column(String(64), unique=True)
+    sku: Mapped[str] = mapped_column(String(64))  # unique within a business
     name: Mapped[str] = mapped_column(String(200))
     category: Mapped[str | None] = mapped_column(String(64))
     stock_unit: Mapped[str] = mapped_column(ForeignKey("units.code"))
@@ -87,6 +169,8 @@ class InventoryItem(Base):
 
     costs: Mapped[list[InventoryItemCost]] = relationship(back_populates="item", cascade="all, delete-orphan")
 
+    __table_args__ = (Index("uq_item_loc_sku", "location_id", "sku", unique=True),)
+
     @property
     def unit_cost(self) -> Decimal | None:
         if self.pack_cost is None or not self.pack_size:
@@ -96,13 +180,16 @@ class InventoryItem(Base):
 
 class ItemGroup(Base):
     """A stock item group ("Spirits", "Draft beer"). Items point at it by name (inventory_items.category).
-    The unit and pack fields are defaults for new items in the group; "apply" pushes them onto existing items."""
+    The unit and pack fields are defaults for new items in the group; "apply" pushes them onto existing items.
+    sheet_in_cases: on the uploaded deliveries sheet, the packs number of an item in this group counts cases."""
     __tablename__ = "item_groups"
+    location_id: Mapped[str] = mapped_column(ForeignKey("locations.id"), primary_key=True)
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     stock_unit: Mapped[str] = mapped_column(ForeignKey("units.code"))
     pack_name: Mapped[str | None] = mapped_column(String(32))
     pack_size: Mapped[Decimal] = mapped_column(Numeric(14, 4), default=Decimal(1))
     case_size: Mapped[Decimal] = mapped_column(Numeric(14, 4), default=Decimal(1))
+    sheet_in_cases: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -188,7 +275,7 @@ class Delivery(Base):
     tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft | posted | void
-    source: Mapped[str] = mapped_column(String(16), default="receipt")  # receipt | manual
+    source: Mapped[str] = mapped_column(String(16), default="receipt")  # receipt | manual | sheet
     note: Mapped[str | None] = mapped_column(Text)
     read_error: Mapped[str | None] = mapped_column(Text)  # why the receipt couldn't be read, if it couldn't
     extracted: Mapped[dict | None] = mapped_column(JSON)  # what was read off the receipt, as read
@@ -239,6 +326,7 @@ class ReceiptAlias(Base):
     It only pre-fills the next receipt; every line is still reviewed before posting."""
     __tablename__ = "receipt_aliases"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    location_id: Mapped[str | None] = mapped_column(ForeignKey("locations.id"))
     store_key: Mapped[str] = mapped_column(String(200))
     text_key: Mapped[str] = mapped_column(String(300))
     sku: Mapped[str | None] = mapped_column(String(64))  # the line's product number (sku_key), when it has one
@@ -247,7 +335,7 @@ class ReceiptAlias(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # one store prints the same words for different products (three SIPS wines), told apart by SKU
-    __table_args__ = (Index("uq_receipt_alias_line", "store_key", "text_key", text("coalesce(sku, '')"), unique=True),)
+    __table_args__ = (Index("uq_receipt_alias_loc_line", "location_id", "store_key", "text_key", text("coalesce(sku, '')"), unique=True),)
 
 
 class ImportBatch(Base):
@@ -304,6 +392,7 @@ class SwypeMenuItem(Base):
     Swype items and inventory items have their own numbers and names, and the only bridge between them is a
     recipe (one Swype item -> one or more inventory items, each with its own portion)."""
     __tablename__ = "swype_menu_items"
+    location_id: Mapped[str] = mapped_column(ForeignKey("locations.id"), primary_key=True)
     code: Mapped[str] = mapped_column(String(32), primary_key=True)
     name: Mapped[str] = mapped_column(String(200))  # as Swype has it; every import refreshes it
     custom_name: Mapped[str | None] = mapped_column(String(200))  # our rename; imports leave it alone
@@ -319,7 +408,8 @@ class Recipe(Base):
     change only applies from its date; past weeks keep the portions they were sold with."""
     __tablename__ = "recipes"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    swype_code: Mapped[str] = mapped_column(String(32), unique=True)
+    location_id: Mapped[str | None] = mapped_column(ForeignKey("locations.id"))
+    swype_code: Mapped[str] = mapped_column(String(32))  # unique within a business
     name: Mapped[str] = mapped_column(String(200))
     ignored: Mapped[bool] = mapped_column(Boolean, default=False)  # sold item that takes no tracked stock
     steps: Mapped[str | None] = mapped_column(Text)  # preparation: untracked ingredients, glass, garnish, method
@@ -331,6 +421,8 @@ class Recipe(Base):
                                                          order_by="RecipeVersion.effective_from")
     photo: Mapped[RecipePhoto | None] = relationship(back_populates="recipe", cascade="all, delete-orphan",
                                                      uselist=False, lazy="selectin")
+
+    __table_args__ = (Index("uq_recipe_loc_code", "location_id", "swype_code", unique=True),)
 
 
 class RecipePhoto(Base):
@@ -359,6 +451,10 @@ class RecipeVersion(Base):
 
 
 class RecipeLine(Base):
+    """One portion of a recipe: qty/unit of one stock item, or of any one of several ("6 oz of Box A or Box B or
+    Box C"). item_id is the first one listed; the others are in `options`. The order means nothing: no item is
+    the main one, since Swype never says which was poured. A line with options makes its items one pool on the
+    variance report (services/variance.py)."""
     __tablename__ = "recipe_lines"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     version_id: Mapped[str] = mapped_column(ForeignKey("recipe_versions.id"))
@@ -369,10 +465,44 @@ class RecipeLine(Base):
 
     version: Mapped[RecipeVersion] = relationship(back_populates="lines")
     item: Mapped[InventoryItem] = relationship()
+    options: Mapped[list[RecipeLineOption]] = relationship(back_populates="line", cascade="all, delete-orphan",
+                                                           order_by="RecipeLineOption.position", lazy="selectin")
+
+    @property
+    def items(self) -> list[InventoryItem]:
+        """Every item the portion can come out of, first one first."""
+        return [self.item, *(o.item for o in self.options)]
+
+    @property
+    def item_ids(self) -> list[str]:
+        return [self.item_id, *(o.item_id for o in self.options)]
+
+
+class RecipeLineOption(Base):
+    """The second and later items of a recipe line that can be poured from any one of several items."""
+    __tablename__ = "recipe_line_options"
+    line_id: Mapped[str] = mapped_column(ForeignKey("recipe_lines.id"), primary_key=True)
+    item_id: Mapped[str] = mapped_column(ForeignKey("inventory_items.id"), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, default=1)
+
+    line: Mapped[RecipeLine] = relationship(back_populates="options")
+    item: Mapped[InventoryItem] = relationship(lazy="joined")
 
 
 class AppSetting(Base):
+    """scope is a business id, or "platform" for the few settings that cover every tenant (services/settings_svc.py)."""
     __tablename__ = "app_settings"
+    scope: Mapped[str] = mapped_column(String(36), primary_key=True, default="platform")
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
+class UserPref(Base):
+    """A choice one login made in one business (which variance chart to show). Not shared with other logins,
+    and each business keeps its own; see services/settings_svc.py."""
+    __tablename__ = "user_prefs"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    location_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
 
@@ -380,6 +510,8 @@ class AppSetting(Base):
 class DataIssue(Base):
     __tablename__ = "data_issues"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str | None] = mapped_column(String(36))
+    location_id: Mapped[str | None] = mapped_column(String(36))  # null: about the tenant as a whole (a locked login)
     code: Mapped[str] = mapped_column(String(48))
     entity: Mapped[str | None] = mapped_column(String(32))
     entity_id: Mapped[str | None] = mapped_column(String(64))
@@ -390,15 +522,26 @@ class DataIssue(Base):
 
 
 class User(Base):
-    """A portal login. Admins can do everything, manage users included. Everyone else gets a level per area
-    (permissions = {"counts": "edit", "variance": "view", ...}; a missing area means no access).
+    """A portal login. It belongs to one tenant; usernames and emails are unique across the platform.
+    is_admin is a tenant admin: every business of the tenant, plus its businesses and users. Everyone else gets a
+    level per area in each business they are a member of (BusinessMember.permissions = {"counts": "edit", ...};
+    a missing area means no access). `permissions` here is what the single bar used before businesses and is no
+    longer read. is_platform_admin logins have no tenant and only reach the platform console.
     Bumping session_version logs the user out everywhere (password reset, deactivation)."""
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.id"), index=True)
+    is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    last_location_id: Mapped[str | None] = mapped_column(String(36))  # the business this login worked in last
     username: Mapped[str] = mapped_column(String(64), unique=True)  # stored lower case
     display_name: Mapped[str] = mapped_column(String(120))
     password_hash: Mapped[str] = mapped_column(String(255))
     pin_hash: Mapped[str | None] = mapped_column(String(255))  # quick login on the shared bar PC; counts and deliveries only
+    email: Mapped[str | None] = mapped_column(String(254), unique=True)  # stored lower case
+    totp_secret: Mapped[str | None] = mapped_column(String(255))  # encrypted, see services/logins.py
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # null until a first code is confirmed
+    totp_last_step: Mapped[int | None] = mapped_column(Integer)  # last 30-second step used, so a code can't be replayed
+    recovery_codes: Mapped[list | None] = mapped_column(JSON)  # keyed hashes of the unused ones
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     permissions: Mapped[dict] = mapped_column(JSON, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -409,6 +552,22 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     session_mode = "password"  # not stored: how the current request's session was opened (password | pin), set by app.auth
+    session_mfa = False  # not stored: this session passed the second login step
+    session_business = None  # not stored: the business this request works in (Location.id)
+    session_permissions = None  # not stored: this login's levels in that business
+    session_started = None  # not stored: when the session was opened (epoch seconds)
+
+
+class AuthToken(Base):
+    """A one-time secret sent by email: invite, reset (links) or mfa_email (a code). Only a keyed hash is kept."""
+    __tablename__ = "auth_tokens"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AuditEvent(Base):
@@ -419,6 +578,8 @@ class AuditEvent(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    tenant_id: Mapped[str | None] = mapped_column(String(36))  # not part of the hash chain (added later)
+    location_id: Mapped[str | None] = mapped_column(String(36))  # the business the request worked in, if any
     username: Mapped[str | None] = mapped_column(String(64))  # as typed for a failed login; kept if the user is renamed
     seq: Mapped[int | None] = mapped_column(Integer, unique=True)
     action: Mapped[str] = mapped_column(String(32))  # login | login_failed | login_blocked | logout | change | denied | read | system
@@ -432,7 +593,7 @@ class AuditEvent(Base):
     prev_hash: Mapped[str | None] = mapped_column(String(64))
     hash: Mapped[str | None] = mapped_column(String(64))
 
-    __table_args__ = (Index("ix_audit_user_at", "user_id", "at"), Index("ix_audit_at", "at"))
+    __table_args__ = (Index("ix_audit_user_at", "user_id", "at"), Index("ix_audit_at", "at"), Index("ix_audit_tenant_at", "tenant_id", "at"))
 
 
 class AuditChange(Base):

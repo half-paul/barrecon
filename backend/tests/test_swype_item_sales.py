@@ -96,7 +96,7 @@ def test_api_fetch_from_swype(client, monkeypatch):
     from app.services import swype_api
     asked = []
 
-    def fake(df, dt):
+    def fake(cr, df, dt):
         asked.append((df, dt))
         return report()
     monkeypatch.setattr(swype_api, "fetch_item_sales", fake)
@@ -110,7 +110,7 @@ def test_api_fetch_from_swype(client, monkeypatch):
     r = client.post("/api/imports/swype-item-sales/fetch", json={"date_from": "2026-10-25", "date_to": "2026-10-19"})
     assert r.status_code == 400
 
-    def down(df, dt):
+    def down(cr, df, dt):
         raise swype_api.SwypeError("Swype has no sales from x to y")
     monkeypatch.setattr(swype_api, "fetch_item_sales", down)
     r = client.post("/api/imports/swype-item-sales/fetch", json={"date_from": "2026-10-19", "date_to": "2026-10-25"})
@@ -119,12 +119,11 @@ def test_api_fetch_from_swype(client, monkeypatch):
 
 def test_fetch_needs_login(monkeypatch):
     from app.services import swype_api
-    monkeypatch.setattr(swype_api.settings, "swype_email", "")
     import datetime as _d
     try:
-        swype_api.fetch_item_sales(_d.date(2026, 10, 19), _d.date(2026, 10, 25))
+        swype_api.fetch_item_sales(None, _d.date(2026, 10, 19), _d.date(2026, 10, 25))  # a business with no Swype login
     except swype_api.SwypeError as e:
-        assert "SWYPE_EMAIL" in str(e)
+        assert "not set up for this business" in str(e)
     else:
         raise AssertionError("expected SwypeError")
 
@@ -135,7 +134,7 @@ def test_api_fetch_one_day_at_a_time(client, monkeypatch):
     yesterday = _d.date.today() - _d.timedelta(days=1)
     closed = {yesterday - _d.timedelta(days=1)}
 
-    def fake(df, dt):
+    def fake(cr, df, dt):
         if df in closed:
             raise swype_api.NoSales("Swype has no sales")
         return report(f"From {df:%m/%d/%Y} to {dt:%m/%d/%Y}\nAll Price Type")
@@ -154,7 +153,7 @@ def test_api_fetch_one_day_at_a_time(client, monkeypatch):
 def test_api_delete_range(client, monkeypatch):
     from app.services import swype_api
 
-    def fake(df, dt):
+    def fake(cr, df, dt):
         return report(f"From {df:%m/%d/%Y} to {dt:%m/%d/%Y}\nAll Price Type")
     monkeypatch.setattr(swype_api, "fetch_item_sales", fake)
     for a, b in [("2026-10-12", "2026-10-18"), ("2026-10-19", "2026-10-19"), ("2026-10-20", "2026-10-20")]:
@@ -177,7 +176,7 @@ def test_removed_file_can_be_imported_again(client):
 def test_remove_one_import_removes_its_values(client, monkeypatch):
     from app.services import swype_api
 
-    def fake(df, dt):
+    def fake(cr, df, dt):
         return report(f"From {df:%m/%d/%Y} to {dt:%m/%d/%Y}\nAll Price Type")
     monkeypatch.setattr(swype_api, "fetch_item_sales", fake)
     ids = [client.post("/api/imports/swype-item-sales/fetch", json={"date_from": x, "date_to": x}).json()["batch_id"]
@@ -198,7 +197,7 @@ def test_nightly_import(db, location, monkeypatch):
     first = yesterday - _d.timedelta(days=3)
     asked = []
 
-    def fake(df, dt):
+    def fake(cr, df, dt):
         asked.append(df)
         if df == yesterday - _d.timedelta(days=1):
             raise swype_api.NoSales("closed")
@@ -206,9 +205,9 @@ def test_nightly_import(db, location, monkeypatch):
             raise swype_api.SwypeError("Swype is down")
         return report(f"From {df:%m/%d/%Y} to {dt:%m/%d/%Y}\nAll Price Type")
     monkeypatch.setattr(swype_api, "fetch_item_sales", fake)
-    monkeypatch.setattr(swype_api, "configured", lambda: True)
+    monkeypatch.setattr(swype_api, "configured", lambda db: True)
     fail = True
-    assert sis.apply(db, fake(first, first), "first.xlsx", location.id, source="swype_api")["status"] == "ok"
+    assert sis.apply(db, fake(None, first, first), "first.xlsx", location.id, source="swype_api")["status"] == "ok"
     asked.clear()
 
     now = _d.datetime.now().replace(hour=6)

@@ -2,7 +2,7 @@ import { Fragment, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type SwypeItem, day, groupBy, n } from "../lib/api";
 import { useReadOnly } from "../lib/auth";
-import { Button, Empty, Flash, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
+import { Button, Empty, Flash, inputCls, Loading, Nil, Notice, Page, useAsync } from "../lib/ui";
 
 type Status = "active" | "off" | "all";
 type Range = "all" | "day" | "week" | "month" | "quarter" | "year" | "custom";
@@ -60,7 +60,7 @@ export default function SwypeItems() {
       {all.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <input className={`${inputCls} w-full sm:w-72`} placeholder="Filter by name, Swype # or category" aria-label="Filter Swype items" value={q} onChange={(e) => setParam("q", e.target.value)} />
-          <div className="inline-flex rounded-[10px] border border-line overflow-hidden text-sm" role="group" aria-label="Status">
+          <div className="inline-flex rounded-control border border-line overflow-hidden text-sm" role="group" aria-label="Status">
             {([["active", "Active"], ["off", "Switched off"], ["all", "All"]] as const).map(([k, label]) => (
               <button key={k} aria-pressed={status === k} onClick={() => setParam("status", k === "active" ? "" : k)}
                 className={`px-3 py-1.5 ${status === k ? "bg-raised text-ink font-medium" : "bg-surface text-muted hover:text-ink"}`}>
@@ -71,7 +71,7 @@ export default function SwypeItems() {
       )}
       {all.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 mb-4">
-          <div className="inline-flex flex-wrap rounded-[10px] border border-line overflow-hidden text-sm" role="group" aria-label="Sold in">
+          <div className="inline-flex flex-wrap rounded-control border border-line overflow-hidden text-sm" role="group" aria-label="Sold in">
             {RANGES.map(([k, label]) => (
               <button key={k} aria-pressed={range === k} onClick={() => pickRange(k)}
                 className={`px-3 py-1.5 ${range === k ? "bg-raised text-ink font-medium" : "bg-surface text-muted hover:text-ink"}`}>{label}</button>))}
@@ -83,24 +83,24 @@ export default function SwypeItems() {
           </>)}
           {range !== "all" && periods.data && (
             <span className="text-sm text-muted">{hit.length
-              ? <>Sold counts {hit.length} imported report{hit.length > 1 ? "s" : ""}, {day(hit[0].period_from)} – {day(hit[hit.length - 1].period_to)}. A report overlapping the range counts whole.</>
+              ? <>Sold counts {hit.length} imported report{hit.length > 1 ? "s" : ""}, {day(hit[0].period_from)} to {day(hit[hit.length - 1].period_to)}. A report overlapping the range counts whole.</>
               : "No Swype sales imported for this range."}</span>)}
         </div>
       )}
       {all.length > 0 && shown.length === 0 && <Empty>No Swype items match.</Empty>}
       {shown.length > 0 && (
-        <div className="card table-box px-2"><table className="grid">
+        <div className="table-box"><table className="grid">
           <thead><tr><th>Swype #</th><th>Name</th><th className="r">Sold</th><th className="r">Last sold</th><th>Active</th><th /></tr></thead>
           <tbody>
             {groups.map(([c, rows]) => (<Fragment key={c}>
-              <tr className="section"><td colSpan={6}>{c} <span className="text-faint font-normal normal-case tracking-normal">{rows.length}</span></td></tr>
+              <tr className="section"><td colSpan={6}>{c} <span className="text-faint font-normal">{rows.length}</span></td></tr>
               {rows.map((it) => editing === it.code
                 ? <EditRow key={it.code} it={it} onSave={(name) => patch(it, { name })} onCancel={() => setEditing(null)} />
                 : (
                   <tr key={it.code} className={it.is_active ? "" : "text-muted"}>
                     <td className="num text-muted whitespace-nowrap">{it.code}</td>
                     <td>{it.name}{it.renamed && <div className="text-xs text-muted">Swype: {it.swype_name}</div>}</td>
-                    <td className="r num">{it.sold ? n(it.sold, 0) : <span className="text-faint">—</span>}</td>
+                    <td className="r num">{it.sold ? n(it.sold, 0) : <Nil />}</td>
                     <td className="r num whitespace-nowrap">{it.last_sold ? day(it.last_sold) : <span className="text-faint">never</span>}</td>
                     <td><input type="checkbox" disabled={viewOnly} aria-label={`${it.name} active`} checked={it.is_active} onChange={(e) => patch(it, { is_active: e.target.checked })} /></td>
                     <td className="r"><button hidden={viewOnly} className="text-sm text-muted hover:text-ink underline" aria-label={`Rename ${it.name}`} onClick={() => setEditing(it.code)}>Rename</button></td>
@@ -120,7 +120,7 @@ function EditRow({ it, onSave, onCancel }: { it: SwypeItem; onSave: (name: strin
       <td className="num text-muted whitespace-nowrap">{it.code}</td>
       <td colSpan={4}>
         <input className="cell-input text-left w-full max-w-md" autoFocus value={name} aria-label="Name" onChange={(e) => setName(e.target.value)} />
-        <div className="text-xs text-muted mt-1">Swype: {it.swype_name}. Leave blank to use Swype's name.</div>
+        <div className="text-xs text-muted mt-1">Swype: {it.swype_name}. Leave blank to use Swype’s name.</div>
       </td>
       <td className="r whitespace-nowrap">
         <Button onClick={() => onSave(name)}>Save</Button>

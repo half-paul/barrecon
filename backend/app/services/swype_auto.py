@@ -16,11 +16,10 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from .. import audit
+from .. import audit, tenancy
 from ..config import settings
 from ..db import SessionLocal
-from ..models import DataIssue
-from ..seed import default_location
+from ..models import DataIssue, Location, Tenant
 from . import settings_svc, swype_api, swype_item_sales, variance
 
 log = logging.getLogger(__name__)
@@ -39,13 +38,15 @@ def days_to_import(db: Session, location_id: str) -> list[date]:
 
 
 def run(db: Session) -> dict:
-    """Import the missing days now. Returns {"imported", "no_sales", "error"}; also stored as swype_auto_last."""
-    loc = default_location(db).id
+    """Import the missing days of the business this session works in. Returns {"imported", "no_sales", "error"};
+    also stored as swype_auto_last."""
+    loc = tenancy.business_id(db)
+    cr = swype_api.creds(db)
     out: dict = {"at": datetime.now(ZoneInfo(settings.timezone)).isoformat(timespec="minutes"),
                  "imported": [], "no_sales": [], "error": None}
     for d in days_to_import(db, loc):
         try:
-            data = swype_api.fetch_item_sales(d, d)
+            data = swype_api.fetch_item_sales(cr, d, d)
         except swype_api.NoSales:
             out["no_sales"].append(d.isoformat())
             continue
@@ -67,7 +68,7 @@ def run(db: Session) -> dict:
 
 def due(db: Session, now: datetime) -> bool:
     """On, Swype login set, past today's hour, and not run yet today (so a restart after the hour still runs)."""
-    if settings_svc.get(db, "swype_auto_import") != "true" or not swype_api.configured():
+    if settings_svc.get(db, "swype_auto_import") != "true" or not swype_api.configured(db):
         return False
     if now.hour < int(settings_svc.get(db, "swype_auto_import_hour")):
         return False
@@ -76,12 +77,20 @@ def due(db: Session, now: datetime) -> bool:
 
 
 def tick() -> None:
+    """Each active business of an active tenant in turn, in its own session and audit event."""
     with SessionLocal() as db:
-        if due(db, datetime.now(ZoneInfo(settings.timezone))):
-            with audit.system_job("swype_auto", area="sales") as job:
-                r = run(db)
-                job["detail"] = r
-            log.info("nightly Swype import: %s", r)
+        todo = [(b.tenant_id, b.id, b.name) for b in db.query(Location).join(Tenant, Tenant.id == Location.tenant_id)
+                .filter(Location.is_active.is_(True), Tenant.status == "active", Location.swype_email.isnot(None))]
+    for tenant_id, business_id, name in todo:
+        try:
+            with SessionLocal() as db, tenancy.scope(db, tenant_id, business_id):
+                if due(db, datetime.now(ZoneInfo(settings.timezone))):
+                    with audit.system_job("swype_auto", area="sales", tenant_id=tenant_id, location_id=business_id) as job:
+                        r = run(db)
+                        job["detail"] = r
+                    log.info("nightly Swype import for %s: %s", name, r)
+        except Exception:  # noqa: BLE001 - one business failing must not stop the others
+            log.exception("nightly Swype import failed for %s", name)
 
 
 async def loop() -> None:

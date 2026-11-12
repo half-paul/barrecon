@@ -66,8 +66,9 @@ def check_file(data: bytes, content_type: str) -> None:
         raise ReceiptReadError(f"the file is over {RECEIPT_MAX_BYTES // (1024 * 1024)} MB")
 
 
-def read(data: bytes, content_type: str) -> dict:
-    """The receipt's contents as SCHEMA describes. Raises ReceiptReadError with a message for the user."""
+def read(data: bytes, content_type: str, meter=None) -> dict:
+    """The receipt's contents as SCHEMA describes. Raises ReceiptReadError with a message for the user.
+    meter(model, usage, ok) is called once Claude has answered, whatever the answer, so the call is counted."""
     if not enabled():
         raise ReceiptReadError("receipt reading is off (no ANTHROPIC_API_KEY); enter the lines by hand")
     b64 = base64.standard_b64encode(data).decode("ascii")
@@ -97,6 +98,8 @@ def read(data: bytes, content_type: str) -> dict:
         raise ReceiptReadError(f"Claude returned an error ({e.status_code}); try reading it again") from None
     except anthropic.APIConnectionError:
         raise ReceiptReadError("couldn't reach Claude; check the server's internet connection") from None
+    if meter:
+        meter(resp.model, resp.usage, resp.stop_reason not in ("refusal", "max_tokens"))
     if resp.stop_reason == "refusal":
         raise ReceiptReadError("Claude declined to read this file")
     if resp.stop_reason == "max_tokens":

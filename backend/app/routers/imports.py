@@ -12,7 +12,7 @@ from ..auth import Auth, perm
 from ..db import get_db
 from ..models import DataIssue, ImportBatch
 from ..schemas import BatchOut, IssueOut
-from ..seed import default_location
+from ..tenancy import business_id
 from ..services import legacy_import, settings_svc, swype_api, swype_item_sales, swype_items
 
 router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Auth])
@@ -46,10 +46,10 @@ async def legacy_preview(file: UploadFile, db: Session = Depends(get_db)):
 @router.post("/legacy", dependencies=[IMPORTS])
 async def legacy_apply(file: UploadFile, db: Session = Depends(get_db), include_counts: bool = True,
                        include_deliveries: bool = True):
-    loc = default_location(db)
+    loc = business_id(db)
     data = await file.read()
     try:
-        return legacy_import.apply(db, data, file.filename or "legacy.xlsx", loc.id,
+        return legacy_import.apply(db, data, file.filename or "legacy.xlsx", loc,
                                    count_weekday=int(settings_svc.get(db, "count_weekday")),
                                    include_counts=include_counts, include_deliveries=include_deliveries)
     except Exception as e:  # noqa: BLE001
@@ -67,8 +67,8 @@ async def swype_item_sales_preview(file: UploadFile, db: Session = Depends(get_d
 
 @router.post("/swype-item-sales", dependencies=[SALES])
 async def swype_item_sales_apply(file: UploadFile, db: Session = Depends(get_db)):
-    loc = default_location(db)
-    r = swype_item_sales.apply(db, await file.read(), file.filename or "item_sales.xlsx", loc.id)
+    loc = business_id(db)
+    r = swype_item_sales.apply(db, await file.read(), file.filename or "item_sales.xlsx", loc)
     if r["status"] != "ok":
         raise HTTPException(400, f"nothing imported: {r['error']}")
     return r
@@ -81,9 +81,9 @@ class SwypeFetchIn(BaseModel):
 
 @router.get("/swype-item-sales/fetch", dependencies=[SALES])
 def swype_item_sales_fetch_status(db: Session = Depends(get_db)):
-    start, end = swype_item_sales.pending_range(db, default_location(db).id)
+    start, end = swype_item_sales.pending_range(db, business_id(db))
     last = settings_svc.get(db, "swype_auto_last")
-    return {"configured": swype_api.configured(), "next_from": start, "through": end,
+    return {"configured": swype_api.configured(db), "next_from": start, "through": end,
             "auto": {"enabled": settings_svc.get(db, "swype_auto_import") == "true",
                      "hour": int(settings_svc.get(db, "swype_auto_import_hour")),
                      "last": json.loads(last) if last else None}}
@@ -98,13 +98,13 @@ def swype_item_sales_fetch(body: SwypeFetchIn, db: Session = Depends(get_db)):
     if body.date_from > date.today():
         raise HTTPException(400, "the 'from' date is in the future")
     try:
-        data = swype_api.fetch_item_sales(body.date_from, body.date_to)
+        data = swype_api.fetch_item_sales(swype_api.creds(db), body.date_from, body.date_to)
     except swype_api.NoSales:
         return {"status": "no_sales", "period_from": body.date_from, "period_to": body.date_to}
     except swype_api.SwypeError as e:
         raise HTTPException(502, str(e)) from None
     r = swype_item_sales.apply(db, data, f"swype_item_sales_{body.date_from}_{body.date_to}.xlsx",
-                               default_location(db).id, source="swype_api")
+                               business_id(db), source="swype_api")
     if r["status"] != "ok":
         raise HTTPException(400, f"nothing imported: {r['error']}")
     return r
@@ -112,12 +112,12 @@ def swype_item_sales_fetch(body: SwypeFetchIn, db: Session = Depends(get_db)):
 
 @router.get("/swype-item-sales/periods", dependencies=[SALES])
 def swype_item_sales_periods(db: Session = Depends(get_db)):
-    return swype_item_sales.periods(db, default_location(db).id)
+    return swype_item_sales.periods(db, business_id(db))
 
 
 @router.get("/swype-item-sales/periods/{period_from}/{period_to}/items", dependencies=[SALES])
 def swype_item_sales_period_items(period_from: date, period_to: date, db: Session = Depends(get_db)):
-    rows = swype_item_sales.period_items(db, default_location(db).id, period_from, period_to)
+    rows = swype_item_sales.period_items(db, business_id(db), period_from, period_to)
     if not rows:
         raise HTTPException(404, "no sales imported for that period")
     return rows
@@ -128,12 +128,12 @@ def swype_item_sales_delete_range(date_from: date, date_to: date, db: Session = 
     """Remove the imported sales for every period wholly inside the dates (one day or many)."""
     if date_to < date_from:
         raise HTTPException(400, "the 'to' date is before the 'from' date")
-    return swype_item_sales.delete_range(db, default_location(db).id, date_from, date_to)
+    return swype_item_sales.delete_range(db, business_id(db), date_from, date_to)
 
 
 @router.delete("/swype-item-sales/periods/{period_from}/{period_to}", dependencies=[SALES])
 def swype_item_sales_delete(period_from: date, period_to: date, db: Session = Depends(get_db)):
-    n = swype_item_sales.delete_period(db, default_location(db).id, period_from, period_to)
+    n = swype_item_sales.delete_period(db, business_id(db), period_from, period_to)
     if not n:
         raise HTTPException(404, "no sales imported for that period")
     return {"deleted": n}
@@ -149,7 +149,7 @@ async def swype_items_preview(file: UploadFile, db: Session = Depends(get_db)):
 
 @router.post("/swype-items", dependencies=[SWYPE])
 async def swype_items_apply(file: UploadFile, db: Session = Depends(get_db)):
-    r = swype_items.apply_csv(db, await file.read(), file.filename or "export_items.csv", default_location(db).id)
+    r = swype_items.apply_csv(db, await file.read(), file.filename or "export_items.csv", business_id(db))
     if r["status"] != "ok":
         raise HTTPException(400, f"nothing imported: {r['error']}")
     return r

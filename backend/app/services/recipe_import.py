@@ -8,6 +8,8 @@ Tabs:
            unless the note starts with "Note:", which makes it a recipe note: why the portions are what they
            are (a pre-batch scaled to the pour, a substitute). The note on a tracked ingredient is a recipe
            note as well. A drink with no tracked ingredient at all is saved as taking no stock.
+           Several skus split by "|" ("BOXA | BOXB | BOXC") make a portion that comes out of any one of
+           them (a "Mystery Wine" poured from whichever box is open).
   Items    optional, same columns as Items.xlsx: bottles the recipes need that the portal doesn't have yet.
            Upserted before the recipes are saved.
 
@@ -88,13 +90,15 @@ def import_recipes(db: Session, data: bytes, file_name: str) -> ImportResult:
                 elif note:
                     d["steps"].append(note)
                 continue
-            if inv.item_by_sku(db, sku) is None and sku not in file_skus:
-                raise ValueError(f"row {n}: sku {sku} ({ingredient}) is not an item; add it to the Items tab or the Stock items page")
+            skus = list(dict.fromkeys(x.strip() for x in sku.split("|") if x.strip()))
+            for one in skus:
+                if inv.item_by_sku(db, one) is None and one not in file_skus:
+                    raise ValueError(f"row {n}: sku {one} ({ingredient}) is not an item; add it to the Items tab or the Stock items page")
             if qty is None or qty <= 0:
                 raise ValueError(f"row {n}: qty for {ingredient or sku} must be more than 0")
             if unit not in BASE_UNITS or unit not in units:
                 raise ValueError(f"row {n}: unit {unit!r} unknown (use one of {sorted(BASE_UNITS)})")
-            d["lines"].append({"sku": sku, "qty": qty, "unit": unit, "note": note})
+            d["lines"].append({"skus": skus, "qty": qty, "unit": unit, "note": note})
         except ValueError as e:
             errors.append(RowResult(n, "error", str(e)))
     if not rows:
@@ -114,18 +118,19 @@ def import_recipes(db: Session, data: bytes, file_name: str) -> ImportResult:
         existed = rec.load(db, code) is not None
         lines = []
         for ln in d["lines"]:
-            item = inv.item_by_sku(db, ln["sku"])
-            lines.append({"item_id": item.id, "qty": ln["qty"], "unit": ln["unit"]})
+            items = [inv.item_by_sku(db, s) for s in ln["skus"]]
+            lines.append({"item_ids": [it.id for it in items], "qty": ln["qty"], "unit": ln["unit"]})
             if ln["note"]:
-                d["notes"].append(f"{item.name}: {ln['note']}")
+                d["notes"].append(f"{' or '.join(it.name for it in items)}: {ln['note']}")
         r = rec.save(db, code, name=d["name"], lines=lines, ignored=not lines,
                      steps="\n".join(d["steps"]) or None, notes="\n".join(d["notes"]) or None)
         warn = []
         for ln in r.versions[-1].lines if r.versions else []:
-            try:
-                rec.to_stock_unit(ln.qty, ln.unit, ln.item, oz_ml)
-            except ConversionError:
-                warn.append(f"{ln.item.name} is counted in '{ln.item.stock_unit}', so {ln.unit} can't be converted")
+            for it in ln.items:
+                try:
+                    rec.to_stock_unit(ln.qty, ln.unit, it, oz_ml)
+                except ConversionError:
+                    warn.append(f"{it.name} is counted in '{it.stock_unit}', so {ln.unit} can't be converted")
         msg = f"{code} {r.name}: " + (f"{len(lines)} tracked ingredient(s)" if lines else "takes no tracked stock")
         res.rows.append(RowResult(d["row"], "updated" if existed else "inserted", "; ".join([msg, *warn])))
         res.updated += existed

@@ -38,12 +38,13 @@ log = logging.getLogger(__name__)
 READ_METHODS = ("GET", "HEAD", "OPTIONS")
 SKIP = {"/api/auth/login", "/api/auth/logout"}  # recorded by the auth router itself
 MAX_BODY = 16_000
-SECRET = re.compile(r"pass|secret|token|key|(^|_)pin$", re.I)
+SECRET = re.compile(r"pass|secret|token|key|(^|_)pin$|mfa_code", re.I)
 FILENAME = re.compile(rb'filename="([^"]{1,255})"')
 # reads worth knowing about: data leaving the portal, and who looked at the audit log
 SENSITIVE_READS = {
     "/api/items/export.xlsx", "/api/counts/template.xlsx", "/api/movements/template.xlsx",
     "/api/deliveries/{delivery_id}/receipt", "/api/audit", "/api/audit/{event_id}/changes", "/api/users",
+    "/api/platform/reports/monthly", "/api/platform/tenants/{tenant_id}", "/api/platform/audit/{event_id}/changes",
 }
 
 audit_ctx: ContextVar[dict | None] = ContextVar("audit_ctx", default=None)
@@ -90,9 +91,9 @@ def client_ip(scope: Scope) -> str | None:
 
 # ---- field-level changes ----------------------------------------------------------------------------------
 
-SKIP_TABLES = {"audit_events", "audit_changes"}
+SKIP_TABLES = {"audit_events", "audit_changes", "auth_tokens"}
 NOISE = {"created_at", "updated_at"}
-HIDDEN = {"password_hash", "pin_hash"}  # recorded as changed, never the value
+HIDDEN = {"password_hash", "pin_hash", "totp_secret", "recovery_codes", "swype_password"}  # recorded as changed, never the value
 COLLAPSE = 200  # more rows than this of one table in one flush: one summary row
 BIG_JSON = 2000
 
@@ -295,8 +296,9 @@ def purge(s: Session, retention_days: int) -> dict:
 
 
 @contextmanager
-def system_job(name: str, area: str | None = None):
-    """Record what a background job changed as one event by `system:<name>`. Put a summary in holder["detail"]."""
+def system_job(name: str, area: str | None = None, tenant_id: str | None = None, location_id: str | None = None):
+    """Record what a background job changed as one event by `system:<name>`, for the business it ran for.
+    Put a summary in holder["detail"]."""
     holder: dict[str, Any] = {"event_id": new_id(), "username": f"system:{name}"}
     tok = audit_ctx.set(holder)
     status = 200
@@ -309,7 +311,7 @@ def system_job(name: str, area: str | None = None):
         audit_ctx.reset(tok)
         if holder.get("changes") or holder.get("detail") or status != 200:
             record(id=holder["event_id"], username=holder["username"], action="system", area=area,
-                   path=name, status=status, detail=holder.get("detail"))
+                   path=name, status=status, detail=holder.get("detail"), tenant_id=tenant_id, location_id=location_id)
 
 
 # ---- plain-language labels --------------------------------------------------------------------------------
@@ -317,6 +319,11 @@ def system_job(name: str, area: str | None = None):
 LABELS: dict[tuple[str, str], str] = {
     ("POST", "/api/auth/password"): "Changed own password",
     ("POST", "/api/auth/pin"): "Changed own PIN",
+    ("POST", "/api/auth/mfa/recovery-codes"): "Made new recovery codes",
+    ("POST", "/api/auth/mfa/reset"): "Removed own authenticator",
+    ("POST", "/api/auth/mfa/enroll"): "Started two-step login setup",
+    ("POST", "/api/auth/mfa/enroll/confirm"): "Turned on two-step login",
+    ("POST", "/api/auth/mfa/disable"): "Turned off two-step login",
     ("POST", "/api/items/import"): "Imported stock items sheet",
     ("POST", "/api/items"): "Added stock item",
     ("PATCH", "/api/items/{item_id}"): "Changed stock item",
@@ -377,12 +384,34 @@ LABELS: dict[tuple[str, str], str] = {
     ("DELETE", "/api/users/{user_id}/pin"): "Removed user's PIN",
     ("POST", "/api/users/{user_id}/logout"): "Logged user out everywhere",
     ("POST", "/api/users/{user_id}/unlock"): "Unlocked user's login",
+    ("POST", "/api/users/{user_id}/invite"): "Resent user's invite",
+    ("POST", "/api/users/{user_id}/mfa/reset"): "Reset user's two-step login",
     ("GET", "/api/users"): "Viewed users",
     ("GET", "/api/audit"): "Searched audit log",
     ("GET", "/api/audit/{event_id}/changes"): "Viewed audit details",
+    ("GET", "/api/platform/audit/{event_id}/changes"): "Viewed audit details",
+    ("POST", "/api/auth/business"): "Switched business",
+    ("POST", "/api/businesses"): "Added business",
+    ("PATCH", "/api/businesses/{business_id}"): "Changed business",
+    ("PUT", "/api/businesses/{business_id}/logo"): "Changed business logo",
+    ("DELETE", "/api/businesses/{business_id}/logo"): "Removed business logo",
+    ("PUT", "/api/businesses/{business_id}/members/{user_id}"): "Set user's access to a business",
+    ("DELETE", "/api/businesses/{business_id}/members/{user_id}"): "Removed user from a business",
+    ("POST", "/api/platform/tenants"): "Added tenant",
+    ("GET", "/api/platform/tenants/{tenant_id}"): "Viewed tenant",
+    ("PATCH", "/api/platform/tenants/{tenant_id}"): "Changed tenant",
+    ("POST", "/api/platform/tenants/{tenant_id}/suspend"): "Suspended tenant",
+    ("POST", "/api/platform/tenants/{tenant_id}/reactivate"): "Reactivated tenant",
+    ("POST", "/api/platform/tenants/{tenant_id}/admins"): "Added tenant admin",
+    ("PUT", "/api/platform/settings"): "Changed platform settings",
+    ("POST", "/api/platform/admins"): "Added platform admin",
+    ("POST", "/api/platform/admins/{user_id}/active"): "Switched platform admin on or off",
+    ("GET", "/api/platform/reports/monthly"): "Viewed usage report",
 }
 ACTION_LABELS = {"login": "Logged in", "login_failed": "Failed login", "login_blocked": "Login blocked (too many tries)",
-                 "logout": "Logged out"}
+                 "logout": "Logged out", "mfa_setup_started": "Started two-step login setup", "mfa_email_sent": "Emailed a recovery code",
+                 "mfa_email_recovery": "Replaced authenticator by email", "reset_requested": "Asked for a password reset",
+                 "password_reset": "Reset password by email", "invite_accepted": "Accepted invite"}
 # where in the portal the thing a route changed is shown
 LINKS = [
     (re.compile(r"^/api/counts/(?P<id>[^/]+)"), "/counts/{id}"),
@@ -468,6 +497,7 @@ class AuditMiddleware:
                 try:
                     await run_in_threadpool(
                         record, id=holder["event_id"], user_id=holder["user_id"], username=holder.get("username"),
+                        tenant_id=holder.get("tenant_id"), location_id=holder.get("location_id"),
                         action=action, area=holder.get("area"), method=scope["method"], route=route, path=path[:500],
                         status=status, ip=client_ip(scope), detail=detail or None)
                 except Exception:  # noqa: BLE001 - never fail a request that already happened; leave a trace in the log

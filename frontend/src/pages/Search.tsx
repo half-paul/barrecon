@@ -4,7 +4,7 @@ import { api, groupBy } from "../lib/api";
 import { type SearchResult, searchHits } from "../lib/palette";
 import { Empty, Loading, Notice, Page, inputCls } from "../lib/ui";
 
-const LIMIT = 500; // per section; the API's cap
+const LIMIT = 500; // per section; the API’s cap
 
 /** Everything the search bar found, not just its first few per section. */
 export default function Search() {
@@ -45,14 +45,14 @@ export default function Search() {
       {s && !current && !error && <Loading />}
       {current && total === 0 && <Empty>Nothing matches.</Empty>}
       {sections.length > 1 && (
-        <div className="inline-flex flex-wrap rounded-[10px] border border-line overflow-hidden text-sm mb-5" role="group" aria-label="Show one section">
+        <div className="inline-flex flex-wrap rounded-control border border-line overflow-hidden text-sm mb-5" role="group" aria-label="Show one section">
           {chip("", `All (${total})`, shown.length === sections.length)}
           {sections.map(([name, rows]) => chip(name, `${name} (${rows.length})`, shown.length === 1 && shown[0][0] === name))}
         </div>
       )}
       {shown.map(([name, rows]) => (
-        <section key={name} className="card mb-4 overflow-hidden">
-          <h2 className="label-caps px-4 pt-3 pb-2 text-[11px]">{name} ({rows.length})</h2>
+        <section key={name} className="mb-6">
+          <h2 className="label pb-1 border-b border-line-strong">{name} ({rows.length})</h2>
           <ul>
             {rows.map((h) => (
               <li key={h.id} className="border-t border-line">

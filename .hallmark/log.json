@@ -1,0 +1,14 @@
+[
+ {
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "brand",
+  "axes": "dark/grotesk-sans/warm",
+  "nav": "kept top bar",
+  "signature": "weekly loop rail and variance ledger",
+  "prompt": "bar stock counting and variance tool",
+  "date": "2026-11-07"
+ }
+]

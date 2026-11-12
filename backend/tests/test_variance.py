@@ -243,3 +243,30 @@ def test_expected_left_is_last_count_plus_deliveries_minus_sold(db, location):
     assert left[vodka.id] == Decimal(2250 + 1500 - 975) and left[gin.id] == Decimal(1500)
     sales(db, location, [("00000561", "Moscow Mule", 100)], period=(date(2026, 10, 20), date(2026, 10, 21)))
     assert variance.expected_left(db, location.id, SUN2)[vodka.id] == 0  # never below zero
+
+
+
+def test_from_to_spans_counts_in_between(client, db, location):
+    from datetime import timedelta
+    vodka = item(db, "VOD", "Smirnoff Vodka", cost=Decimal(30))
+    rec.save(db, "00000561", name="Moscow Mule", lines=[{"item_id": vodka.id, "qty": 75, "unit": "ml"}])
+    week2 = (WEEK[0] + timedelta(days=7), WEEK[1] + timedelta(days=7))
+    sales(db, location, [("00000561", "Moscow Mule", 10)])
+    sales(db, location, [("00000561", "Moscow Mule", 10)], period=week2)
+    a = count(db, location, SUN1, [(vodka, 3)])
+    b = count(db, location, SUN2, [(vodka, 5)])  # a bad middle count: ignored across the span
+    c = count(db, location, SUN2 + timedelta(days=7), [(vodka, 1)])
+    r = variance.run(db, location.id, a.id, c.id)
+    v = row_for(r, vodka)
+    assert r["between_counts"] == 1
+    assert v["opening"] == 2250 and v["closing"] == 750 and v["expected"] == 1500 and v["variance"] == 0
+    assert variance.run(db, location.id, a.id, b.id)["between_counts"] == 0
+    with pytest.raises(variance.VarianceError, match="later"):
+        variance.run(db, location.id, c.id, a.id)
+    with pytest.raises(variance.VarianceError, match="different"):
+        variance.run(db, location.id, a.id, a.id)
+    db.commit()  # the API's sessions share this connection; their rollback would drop uncommitted rows
+    page = client.get("/api/variance/counts?limit=2").json()
+    assert page["total"] == 3 and [x["id"] for x in page["counts"]] == [c.id, b.id]
+    assert [x["id"] for x in client.get("/api/variance/counts?limit=2&offset=2").json()["counts"]] == [a.id]
+    assert client.get(f"/api/variance?opening={c.id}&closing={a.id}").status_code == 400

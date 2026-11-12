@@ -132,10 +132,12 @@ def test_purge_never_leaves_a_hole_in_the_chain(client, db):
     assert client.get("/api/audit/verify").json()["ok"]
 
 
-def test_retention_forever_and_validation(client, db):
+def test_retention_forever_and_validation(client, platform, db):
+    """Retention covers every tenant, so it is set in the platform console; a tenant admin can't change it."""
     audit.record(username="old", action="change", at=utcnow() - timedelta(days=4000))
-    assert client.put("/api/settings", json={"audit_retention_days": 10}).status_code == 422
-    assert client.put("/api/settings", json={"audit_retention_days": 0}).json()["audit_retention_days"] == 0
+    assert client.put("/api/settings", json={"audit_retention_days": 0}).status_code == 403
+    assert platform.put("/api/platform/settings", json={"audit_retention_days": 10}).status_code == 422
+    assert platform.put("/api/platform/settings", json={"audit_retention_days": 0}).json()["audit_retention_days"] == 0
     assert maintenance.purge_audit(db)["deleted"] == 0
 
 
