@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -36,20 +37,47 @@ class PasswordChangeIn(BaseModel):
     new_password: str = Field(min_length=8, max_length=200)
 
 
+EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
+class ForgotIn(BaseModel):
+    login: str = Field(min_length=1, max_length=254)
+
+
+class TokenIn(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+
+
+class SetPasswordIn(TokenIn):
+    password: str = Field(min_length=8, max_length=200)
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+
+
 class UserIn(BaseModel):
+    """With an email and no password, the person gets an invite and picks their own."""
     username: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9._@-]+$")
     display_name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=8, max_length=200)
+    email: str | None = Field(default=None, max_length=254, pattern=EMAIL)
+    password: str | None = Field(default=None, min_length=8, max_length=200)
     is_admin: bool = False
-    permissions: dict[str, str] = {}
+    permissions: dict[str, str] = {}  # levels in the business the admin is working in
+    access: dict[str, dict[str, str]] | None = None  # or: business id -> levels, for every business they may enter
+
+    @model_validator(mode="after")
+    def _email_or_password(self):
+        if not self.email and not self.password:
+            raise ValueError("give an email for the invite, or a password")
+        return self
 
 
 class UserPatch(BaseModel):
     username: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[A-Za-z0-9._@-]+$")
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: str | None = Field(default=None, max_length=254, pattern=EMAIL + "|^$")  # empty removes it
     is_admin: bool | None = None
     is_active: bool | None = None
-    permissions: dict[str, str] | None = None
+    permissions: dict[str, str] | None = None  # levels in the business the admin is working in
+    access: dict[str, dict[str, str]] | None = None  # business id -> levels; replaces every membership
 
 
 class PasswordResetIn(BaseModel):
@@ -62,9 +90,14 @@ class UserOut(ORM):
     display_name: str
     is_admin: bool
     is_active: bool
-    permissions: dict[str, str]
+    permissions: dict[str, str]  # in the business the admin is working in
+    access: dict[str, dict[str, str]] = {}  # business id -> levels
+    email: str | None = None
     has_pin: bool = False
     locked: bool = False
+    mfa_enabled: bool = False
+    invite_pending: bool = False
+    invite_sent: bool | None = None  # only on the reply to an invite
     last_login_at: datetime | None
     password_changed_at: datetime | None
     created_at: datetime
@@ -209,7 +242,8 @@ class DeliveryIn(BaseModel):
     """One invoice (or transfer, return, breakage) covering many items, entered on one sheet."""
     kind: str = "delivery"
     occurred_at: datetime
-    external_ref: str = Field(min_length=1, max_length=200)
+    external_ref: str = Field(min_length=1, max_length=100)
+    store: str | None = Field(default=None, max_length=200)
     note: str | None = None
     lines: list[DeliveryLineIn] = Field(min_length=1)
 
@@ -288,12 +322,24 @@ class SettingsIn(BaseModel):
         return self
 
 
+ChartStyle = Literal["bars", "gap", "difference"]
+
+
+class UserPrefsOut(BaseModel):
+    variance_chart_style: ChartStyle = "bars"
+
+
+class UserPrefsIn(BaseModel):
+    variance_chart_style: ChartStyle | None = None
+
+
 class GroupIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     stock_unit: str
     pack_name: str | None = Field(default=None, max_length=32)
     pack_size: Decimal = Field(gt=0)
     case_size: Decimal = Field(default=Decimal(1), gt=0)
+    sheet_in_cases: bool = False
 
 
 class GroupPatch(BaseModel):
@@ -302,6 +348,7 @@ class GroupPatch(BaseModel):
     pack_name: str | None = Field(default=None, max_length=32)
     pack_size: Decimal | None = Field(default=None, gt=0)
     case_size: Decimal | None = Field(default=None, gt=0)
+    sheet_in_cases: bool | None = None
 
 
 class GroupOut(ORM):
@@ -310,6 +357,7 @@ class GroupOut(ORM):
     pack_name: str | None
     pack_size: Decimal
     case_size: Decimal
+    sheet_in_cases: bool = False
     item_count: int = 0
     active_count: int = 0
     differing: int = 0  # items whose unit or pack differs from the group's defaults

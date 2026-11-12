@@ -3,9 +3,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type CountDetail, type CountLine, dt, groupBy } from "../lib/api";
 import { useReadOnly } from "../lib/auth";
 import { CountBarContext } from "../lib/countbar";
-import { Bottle, Button, Empty, Flash, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
+import { Bottle, Button, Empty, Flash, Loading, Nil, Notice, Page, inputCls, useAsync } from "../lib/ui";
 
-/** ISO instant -> value for a datetime-local input, in the browser's time. */
+/** ISO instant -> value for a datetime-local input, in the browser’s time. */
 const localInput = (iso: string) => { const t = new Date(iso); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 
 export default function CountEntry() {
@@ -37,9 +37,9 @@ export default function CountEntry() {
     try { await api.post(`/api/counts/${id}/post`); nav("/counts"); } catch (e) { setMsg({ kind: "error", text: (e as Error).message }); }
   });
 
-  /** Drops the draft for good; the pending autosave goes first so it can't write to a count that is gone. */
+  /** Drops the draft for good; the pending autosave goes first so it can’t write to a count that is gone. */
   const cancel = async () => {
-    if (!confirm("Cancel this count? The draft and every number entered in it are deleted. This can't be undone.")) return;
+    if (!confirm("Cancel this count? The draft and every number entered in it are deleted. This can’t be undone.")) return;
     window.clearTimeout(timer.current);
     try { await api.del(`/api/counts/${id}`); nav("/counts"); } catch (e) { setMsg({ kind: "error", text: (e as Error).message }); }
   };
@@ -91,10 +91,6 @@ export default function CountEntry() {
   return (
     <Page area="counts" title={`Count · ${dt(s.counted_at)}`} actions={<>
       <Link className="text-sm underline" to="/counts">All counts</Link>
-      {!ro && <div className="flex items-center gap-2 min-w-40" title={`${totalCounted} of ${s.lines.length} items counted`}>
-        <div className="flex-1 h-2 bg-line rounded-full overflow-hidden"><div className="bar h-full bg-accent rounded-full" style={{ width: `${s.lines.length ? (totalCounted / s.lines.length) * 100 : 0}%` }} /></div>
-        <span className="mono text-sm">{totalCounted}/{s.lines.length}</span>
-      </div>}
       {!ro && <label className="flex items-center gap-2 text-sm" title="When the stock was counted. Change it to back-date this count.">
         <span className="text-muted">Counted at</span>
         <input type="datetime-local" className={inputCls} key={s.counted_at} defaultValue={localInput(s.counted_at)} onBlur={(e) => e.target.value !== localInput(s.counted_at) && setDate(e.target.value)} />
@@ -103,7 +99,7 @@ export default function CountEntry() {
     </>}>
       {msg && <Flash kind={msg.kind} onClose={() => setMsg(null)}>{msg.text}</Flash>}
       {ro && <Notice>This count is {s.status}{s.posted_at ? ` (posted ${dt(s.posted_at)})` : ""}.{" "}
-        {s.status === "deleted" ? "It is kept as history; variance and on-hand don't use it."
+        {s.status === "deleted" ? "It is kept as history; variance and on-hand don’t use it."
           : s.status === "superseded" && s.superseded_by
           ? <>It was replaced by a <Link className="underline" to={`/counts/${s.superseded_by}`}>newer version</Link>.</>
           : "To correct the numbers, start a new count at the same date and time."}</Notice>}
@@ -125,14 +121,18 @@ export default function CountEntry() {
             <tbody>{s.versions.map((v) => (
               <tr key={v.id} className={v.status === "superseded" || v.status === "deleted" ? "text-muted" : ""}>
                 <td>{v.id === s.id ? <b>{dt(v.counted_at)}</b> : <Link className="underline" to={`/counts/${v.id}`}>{dt(v.counted_at)}</Link>}</td>
-                <td>{v.status}</td><td>{v.posted_at ? dt(v.posted_at) : "—"}</td><td className="text-muted">{v.note}</td></tr>))}</tbody>
+                <td>{v.status}</td><td>{v.posted_at ? dt(v.posted_at) : <Nil />}</td><td className="text-muted">{v.note}</td></tr>))}</tbody>
           </table></div>
         </details>
       )}
-      {!ro && <p className="text-sm text-muted mb-4">Enter the quantity in packs as one number: 5.7 is 5 whole packs and an open one seven tenths full. Enter 0 if there is none; items left blank are not part of the count. Changes save by themselves.</p>}
+      {!ro && <div className="flex items-center gap-3 mb-3" title={`${totalCounted} of ${s.lines.length} items counted`}>
+        <div className="flex-1 h-1.5 bg-line rounded-chip overflow-hidden"><div className="h-full bg-accent" style={{ width: `${s.lines.length ? (totalCounted / s.lines.length) * 100 : 0}%` }} /></div>
+        <span className="mono text-sm">{totalCounted}/{s.lines.length}</span>
+      </div>}
+      {!ro && <p className="text-sm text-muted mb-4 max-w-[75ch]">Enter the quantity in packs as one number: 5.7 is 5 whole packs and an open one seven tenths full. Enter 0 if there is none; items left blank are not part of the count. Changes save by themselves.</p>}
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <input type="search" className={`${inputCls} w-full sm:w-72`} placeholder="Find an item…" aria-label="Find an item" value={find} onChange={(e) => setFind(e.target.value)} />
-        <div role="group" aria-label="Show" className="inline-flex rounded-[10px] border border-line overflow-hidden text-sm">
+        <div role="group" aria-label="Show" className="inline-flex rounded-control border border-line overflow-hidden text-sm">
           {([["all", "All"], ["todo", "Not counted"], ["done", "Counted"]] as const).map(([k, label]) => (
             <button key={k} type="button" aria-pressed={show === k} onClick={() => setShow(k)}
               className={`px-3 py-1.5 ${show === k ? "bg-raised text-ink font-medium" : "bg-surface text-muted hover:text-ink"}`}>{label}</button>))}
@@ -140,7 +140,7 @@ export default function CountEntry() {
       </div>
       {visible.length === 0 && <Empty>{s.lines.length ? "No item matches." : "This count has no items."}</Empty>}
       {visible.length > 0 && (<>
-        <div className="hidden md:block card table-box px-2"><table className="grid">
+        <div className="hidden md:block table-box"><table className="grid">
           <thead><tr><th>Item</th><th>Pack</th><th className="r">Qty</th><th></th><th className="r">In stock units</th></tr></thead>
           <tbody>
             {groups.map(([cat, lines]) => (<Group key={cat} cat={cat} lines={lines} ro={ro} edits={edits} setEdits={setEdits} />))}
@@ -149,8 +149,8 @@ export default function CountEntry() {
         <div className="md:hidden flex flex-col gap-4">
           {groups.map(([cat, lines]) => (
             <section key={cat}>
-              <h2 className="label-caps mb-2">{cat}</h2>
-              <div className="flex flex-col gap-2">{lines.map((l) => <CountCard key={l.item_id} l={l} ro={ro} edits={edits} setEdits={setEdits} />)}</div>
+              <h2 className="label mb-2">{cat}</h2>
+              <div className="flex flex-col border-t border-line-strong">{lines.map((l) => <CountCard key={l.item_id} l={l} ro={ro} edits={edits} setEdits={setEdits} />)}</div>
             </section>))}
         </div>
       </>)}
@@ -186,12 +186,12 @@ function CountCard({ l, ro, edits, setEdits }: { l: CountLine; ro: boolean; edit
   const decimals = v.includes(".") ? v.slice(v.indexOf(".")) : "";
   const keg = (l.pack_name ?? "").toLowerCase().includes("keg");
   const set = (next: string) => setEdits((x) => ({ ...x, [l.item_id]: next }));
-  const step = "w-11 h-11 rounded-[10px] border border-line bg-surface text-lg disabled:opacity-40";
+  const step = "ctl w-11 h-11 rounded-control border border-line-strong text-lg hover:bg-raised disabled:opacity-55";
   return (
-    <div className={`card p-3 ${blank(v) ? "border-accent/30" : ""}`}>
+    <div className="py-3 border-b border-line">
       <div className="flex items-baseline justify-between gap-2 mb-2">
         <div className="font-medium">{l.name}</div>
-        <div className="text-xs text-muted shrink-0 num">{blank(v) ? "not counted" : `${qty.toFixed(1)} ${l.pack_name ?? "packs"}`}</div>
+        <div className={`text-xs shrink-0 num ${blank(v) ? "text-accent" : "text-muted"}`}>{blank(v) ? "not counted" : `${qty.toFixed(1)} ${l.pack_name ?? "packs"}`}</div>
       </div>
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs text-muted w-14">Qty</span>
@@ -208,7 +208,7 @@ function CountCard({ l, ro, edits, setEdits }: { l: CountLine; ro: boolean; edit
               const on = !blank(v) && Math.abs(open - t) < 0.001;
               return (
               <button key={t} type="button" role="radio" aria-checked={on} disabled={ro} onClick={() => set(t === 0 ? String(whole) : `${whole}.${Math.round(t * 10)}`)}
-                className={`h-9 rounded-lg text-sm num border ${on ? "bg-accent text-accent-ink border-accent font-semibold" : "bg-surface border-line text-muted"}`}>
+                className={`h-11 rounded-control text-sm num border ${on ? "bg-accent text-accent-ink border-accent font-semibold" : "border-line-strong text-muted"}`}>
                 {t === 0 ? "0" : `.${Math.round(t * 10)}`}</button>);
             })}
           </div>

@@ -103,7 +103,7 @@ def search(q: str = "", limit: int = 8, user: User = Depends(current_user), db: 
     for code, r in all_recipes.items():
         m = menu.get(code)
         v = recipes.current_version(r)
-        names = [ln.item.name for ln in v.lines] if v else []
+        names = [it.name for ln in v.lines for it in ln.items] if v else []
         if _has_all(words, [code, r.name, m and swype_items.display_name(m), m and m.category, r.steps, r.notes, *names]):
             in_name = _has_all(words, [r.name])
             recipe_hits.append((not in_name, r.ignored, r.name.lower(), code, {
@@ -126,7 +126,7 @@ def search(q: str = "", limit: int = 8, user: User = Depends(current_user), db: 
                                   .order_by(CountSession.counted_at.desc()).limit(limit))]
 
     movements = [{"id": m.id, "occurred_at": m.occurred_at.isoformat(), "kind": m.kind, "external_ref": m.external_ref,
-                  "item": name, "status": m.status, "note": m.note}
+                  "item": name, "status": m.status, "note": m.note, "delivery_id": m.delivery_id}
                  for m, name in db.execute(select(StockMovement, InventoryItem.name)
                                            .join(InventoryItem, InventoryItem.id == StockMovement.item_id)
                                            .where(_all_words(words, StockMovement.external_ref, StockMovement.note,

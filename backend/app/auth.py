@@ -20,8 +20,9 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy.orm import Session
 
 from .config import settings
+from . import tenancy
 from .db import get_db
-from .models import AuditEvent, DataIssue, User, utcnow
+from .models import AuditEvent, BusinessMember, DataIssue, Tenant, User, utcnow
 from .services import settings_svc
 
 COOKIE = "barrecon_session"
@@ -33,7 +34,7 @@ AREAS: dict[str, tuple[str, tuple[str, ...]]] = {
     "counts": ("Counts", ("view", "edit")),
     "deliveries": ("Deliveries and stock movements", ("view", "edit")),
     "sales": ("Swype sales", ("view", "edit")),
-    "variance": ("Variance", ("view",)),
+    "variance": ("Stock vs sales", ("view",)),
     "items": ("Stock items and groups", ("view", "edit")),
     "swype_items": ("Swype items", ("view", "edit")),
     "recipes": ("Recipes", ("view", "edit")),
@@ -41,6 +42,7 @@ AREAS: dict[str, tuple[str, tuple[str, ...]]] = {
     "settings": ("Settings", ("edit",)),  # anyone logged in can read them
     "audit": ("Audit log", ("view",)),
 }
+INVITED = "!invited"  # password_hash until an invite is accepted; matches no password
 PIN_AREAS = ("counts", "deliveries")  # all a PIN session can reach, whatever the user's own permissions
 READ_METHODS = ("GET", "HEAD", "OPTIONS")
 
@@ -166,7 +168,8 @@ def raise_lock_issue(db: Session, username: str, ip: str | None) -> None:
     recent = db.query(DataIssue).filter(DataIssue.code == "login_locked", DataIssue.entity_id == username,
                                         DataIssue.created_at >= utcnow() - LOCK_WINDOW).first()
     if not recent:
-        db.add(DataIssue(code="login_locked", entity="user", entity_id=username[:64],
+        u = db.query(User).filter(User.username == username).one_or_none()
+        db.add(DataIssue(code="login_locked", entity="user", entity_id=username[:64], tenant_id=u.tenant_id if u else None,
                          detail={"detail": f"Login for {username} blocked after {LOCK_USER} wrong tries (last from {ip or 'unknown'}). "
                                            "If that wasn't them, change their password under Setup → Users."}))
         db.commit()
@@ -201,7 +204,8 @@ def _secure(request: Request | None) -> bool:
 
 
 def _token(user: User, mode: str, started: int) -> str:
-    return _ser.dumps({"u": user.id, "v": user.session_version, "m": mode, "s": started})
+    return _ser.dumps({"u": user.id, "v": user.session_version, "m": mode, "s": started, "f": int(user.session_mfa),
+                       "b": user.session_business or user.last_location_id})
 
 
 def set_session(resp: Response, user: User, request: Request | None = None, mode: str = "password", started: int | None = None) -> None:
@@ -218,15 +222,15 @@ def level(user: User, area: str) -> str | None:
     pin = user.session_mode == "pin"
     if pin and area not in PIN_AREAS:
         return None
-    if user.is_admin:
+    if user.is_admin and not user.is_platform_admin:
         return AREAS[area][1][-1]
-    lv = (user.permissions or {}).get(area)
+    lv = (user.session_permissions or {}).get(area)  # this login's levels in the business it is working in
     return lv if lv in AREAS[area][1] else None
 
 
 def is_admin(user: User) -> bool:
-    """Admin powers need a password session; a PIN never gives them."""
-    return user.is_admin and user.session_mode != "pin"
+    """Tenant admin powers need a password session; a PIN never gives them."""
+    return user.is_admin and not user.is_platform_admin and user.session_mode != "pin"
 
 
 def can(user: User, area: str, need: str = "view") -> bool:
@@ -249,8 +253,39 @@ def note(request: Request, user: User | None = None, area: str | None = None) ->
         return
     if user:
         holder["user_id"], holder["username"] = user.id, user.username
+        holder["tenant_id"], holder["location_id"] = user.tenant_id, user.session_business
     if area:
         holder["area"] = area
+
+
+def tenant_problem(db: Session, u: User) -> str | None:
+    """Why this login can't be used right now, if its tenant stands in the way."""
+    if u.is_platform_admin:
+        return None
+    t = db.get(Tenant, u.tenant_id) if u.tenant_id else None
+    if t is None:
+        return "This login isn't attached to an account. Contact support."
+    if t.status != "active":
+        return "This account is suspended. Contact support."
+    return None
+
+
+def enter(db: Session, u: User, wanted: str | None = None) -> None:
+    """Put this request in the user's tenant and in one of their businesses: the one the session asks for if they
+    may still work there, else the first they may. Sets what app.tenancy filters by, and the user's levels there."""
+    if u.is_platform_admin:
+        u.session_business, u.session_permissions = None, {}
+        tenancy.clear_scope(db)
+        return
+    if msg := tenant_problem(db, u):
+        raise HTTPException(401, msg)
+    mine = tenancy.businesses_of(db, u)
+    b = next((x for x in mine if x.id == wanted), None) or (mine[0] if mine else None)
+    u.session_business = b.id if b else None
+    m = db.get(BusinessMember, (u.id, b.id)) if b and not u.is_admin else None
+    u.session_permissions = dict(m.permissions or {}) if m else {}
+    tenancy.set_scope(db, u.tenant_id, u.session_business)
+    db.info["user_id"] = u.id
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -258,9 +293,7 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     if not tok:
         raise HTTPException(401, "not logged in")
     try:
-        data, signed = _ser.loads(tok, max_age=idle_seconds(db), return_timestamp=True)
-    except SignatureExpired:
-        raise HTTPException(401, "logged out after being idle") from None
+        data, signed = _ser.loads(tok, max_age=settings.session_max_age_seconds, return_timestamp=True)
     except BadSignature:
         raise HTTPException(401, "session expired") from None
     if not isinstance(data, dict):
@@ -272,6 +305,19 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     if not u or not u.is_active or u.session_version != data.get("v"):
         raise HTTPException(401, "session expired")
     u.session_mode = data.get("m") or "password"
+    u.session_mfa = bool(data.get("f"))
+    u.session_started = started
+    enter(db, u, data.get("b"))
+    if time.time() - signed.timestamp() > idle_seconds(db):  # the idle limit is the business's setting
+        raise HTTPException(401, "logged out after being idle")
+    # a tab still showing another business (it was switched in a different tab) must not write into this one
+    shown = request.headers.get("x-business")
+    if shown and u.session_business and shown != u.session_business:
+        raise HTTPException(409, "You switched to another business in a different tab. Reloading.", headers={"X-Business-Changed": "1"})
+    # a password session that skipped the second step ends once it's needed: MFA turned on elsewhere, or required
+    # of admins (also catches someone just made an admin). They log in again with a code, or set it up.
+    if u.session_mode == "password" and not u.session_mfa and (u.totp_enabled_at or (settings.admin_mfa_required and (u.is_admin or u.is_platform_admin))):
+        raise HTTPException(401, "session expired")
     note(request, u)
     holder = _holder(request)
     if holder is not None and time.time() - signed.timestamp() > REFRESH_AFTER_S:
@@ -302,10 +348,19 @@ def perm(area: str):
 def require_admin(request: Request, user: User = Depends(current_user)) -> User:
     note(request, area="users")
     if not is_admin(user):
-        raise HTTPException(403, "Only an admin can manage users." if user.session_mode != "pin"
-                            else "Log in with your password to manage users.")
+        raise HTTPException(403, "Only an admin can manage users and businesses." if user.session_mode != "pin"
+                            else "Log in with your password to manage users and businesses.")
+    return user
+
+
+def require_platform(request: Request, user: User = Depends(current_user)) -> User:
+    """The platform console: platform admins only, password sessions only."""
+    note(request, area="platform")
+    if not user.is_platform_admin or user.session_mode == "pin":
+        raise HTTPException(403, "Only a platform admin can open the platform console.")
     return user
 
 
 Auth = Depends(current_user)  # logged in, any permissions
-Admin = Depends(require_admin)
+Admin = Depends(require_admin)  # a tenant admin
+Platform = Depends(require_platform)

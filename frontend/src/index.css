@@ -1,57 +1,18 @@
-@import "@fontsource-variable/inter";
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: brand · redesign: full
+ * paper: oklch(17.5% 0.006 237) · accent: oklch(79.1% 0.134 79) · display: Hanken Grotesk · body: Hanken Grotesk
+ * nav: kept top bar, solid · signature: the weekly loop rail and the variance ledger · states: loading, empty, error, full
+ * axes: dark/grotesk-sans/warm · posture: Restrained · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V3 · weakest: V, a kept shell and palette limit how far screens can move; moved the difference into surfaces, the loop rail and the ledger */
+/* Hallmark · reworded "remove(from, to," and "remove(range.from, range.to," · 19 names the en dash in their confirm label, now the word to; the handlers themselves are unchanged */
+/* Hallmark · dismissed 28a · the first image on Recipes is a small list thumbnail, the screen's largest paint is the table */
+@import "@fontsource-variable/hanken-grotesk";
 @import "@fontsource-variable/jetbrains-mono";
 @import "tailwindcss";
+@import "./tokens.css";
+@import "./base.css" layer(base);
 
-/* "Night Shift": dark, low-glare palette for a bar after close. Amber is the one accent. */
-@theme {
-  --color-ink: #e6e8ea;
-  --color-muted: #8f989f;
-  --color-faint: #6f7880;
-  --color-line: #262d33;
-  --color-line-strong: #333b42;
-  --color-paper: #0e1113;
-  --color-surface: #151a1e;
-  --color-raised: #1b2126;
-  --color-accent: #e8b04a;
-  --color-accent-deep: #f5c870;
-  --color-accent-ink: #1a1306;
-  --color-amber: #e8b04a;
-  --color-amber-soft: #2a2213;
-  --color-ok: #5fb88a;
-  --color-ok-soft: #132219;
-  --color-info: #6aa0e0;
-  --color-danger: #f08a7e;
-  --color-danger-soft: #2c1714;
-  --font-sans: "Inter Variable", "Segoe UI", "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-}
-
-html { font-family: var(--font-sans); color: var(--color-ink); background: var(--color-paper); color-scheme: dark; }
-
-/* "Day Shift": the same roles on a light ground, for office work in daylight. Picked in the header; dark stays the default. */
-:root[data-theme="light"] {
-  color-scheme: light;
-  --color-ink: #1d2125;
-  --color-muted: #59636c;
-  --color-faint: #78818a;
-  --color-line: #dde1e4;
-  --color-line-strong: #c4cacf;
-  --color-paper: #f5f4f0;
-  --color-surface: #ffffff;
-  --color-raised: #eceef0;
-  --color-accent: #8f620a;
-  --color-accent-deep: #7a5308;
-  --color-accent-ink: #ffffff;
-  --color-amber: #b07a12;
-  --color-amber-soft: #fbf1dc;
-  --color-ok: #1f7a4d;
-  --color-ok-soft: #e3f3ea;
-  --color-info: #2d6cb5;
-  --color-danger: #b3362a;
-  --color-danger-soft: #fbe7e4;
-  --expected: #a3abb2;
-}
-body { margin: 0; font-size: 14px; line-height: 1.45; }
+html { font-family: var(--font-body); color: var(--color-ink); background: var(--color-paper); color-scheme: dark; }
+body { font-size: 15px; line-height: 1.5; caret-color: var(--color-accent); }
 .num { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 input, select, textarea { font: inherit; }
@@ -59,57 +20,114 @@ input, select, textarea { font: inherit; }
 input[type="checkbox"] { accent-color: var(--color-accent); }
 a.underline { text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 3px; }
 a.underline:hover { color: var(--color-accent); }
+a.underline:active { color: var(--color-accent-deep); }
 
+/* Press: one small settle on every control. The base layer's reduced-motion rule stops it. */
+button, summary, label.ctl, a.ctl { transition: transform var(--dur-micro) var(--ease-out), background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out); }
+button:not(:disabled):active, label.ctl:active, a.ctl:active { transform: translateY(1px); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: -2px; }
+:disabled { cursor: not-allowed; }
 
-/* display: table overrides Tailwind's .grid utility, which shares the class name */
+/* A touch screen gets a full hit target; a mouse keeps the dense controls. */
+@media (pointer: coarse) {
+  .ctl, [role="group"] > button { min-height: 44px; }
+}
+
+/* Tables sit straight on the page: hairlines only, no box. display: table overrides Tailwind's .grid utility, which shares the class name. */
 table.grid { display: table; width: 100%; border-collapse: collapse; }
-table.grid th { text-align: left; font-weight: 500; font-size: 12px; color: var(--color-muted); padding: 8px; border-bottom: 1px solid var(--color-line); white-space: nowrap; }
-table.grid td { padding: 8px; border-bottom: 1px solid var(--color-line); vertical-align: middle; }
+table.grid th { text-align: left; font-weight: 500; font-size: var(--text-sm); color: var(--color-muted); padding: var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-line-strong); white-space: nowrap; }
+table.grid td { padding: var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-line); vertical-align: middle; }
+table.grid :is(th, td):first-child { padding-left: 0; }
+table.grid :is(th, td):last-child { padding-right: 0; }
 table.grid tbody tr:hover td { background: color-mix(in srgb, var(--color-raised) 60%, transparent); }
 table.grid th.r, table.grid td.r { text-align: right; }
-table.grid tr.section td { background: var(--color-paper); color: var(--color-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; padding-top: 16px; }
+table.grid tr.section td { background: transparent; color: var(--color-ink); font-size: var(--text-sm); font-weight: 600; padding-top: var(--space-lg); border-bottom-color: var(--color-line-strong); }
 .table-box { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* Phones: iOS zooms into any field under 16px, so fields get 16px; table cells and number boxes tighten to fit 360px */
 @media (max-width: 639px) {
+  body { font-size: 16px; }
   input, select, textarea { font-size: 16px; }
-  table.grid th, table.grid td { padding: 8px 6px; }
+  table.grid th, table.grid td { padding: var(--space-xs) var(--space-2xs); }
   table.grid th { white-space: normal; }
-  .cell-input { width: 4.5rem; padding: 6px; }
+  .cell-input { width: 4.5rem; padding: var(--space-2xs) var(--space-xs); }
 }
-
-@media (prefers-reduced-motion: no-preference) { .fill { transition: height 160ms ease-out; } .bar { transition: width 240ms ease-out; } }
-
-@layer base { :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; } }
 
 /* component classes sit in a layer so Tailwind utilities on the same element (text-left, w-44, p-5) win */
 @layer components {
-  .card { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: 14px; }
-  .label-caps { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-muted); }
-  .cell-input { width: 5.5rem; text-align: right; padding: 4px 8px; border: 1px solid var(--color-line); border-radius: 6px; background: var(--color-paper); color: var(--color-ink); }
-  .cell-input:hover { border-color: var(--color-line-strong); }
-  .cell-input:disabled { background: transparent; border-color: transparent; }
-}
+  /* One container recipe: a tinted well, no border. A table never goes inside one. */
+  .card { background: var(--color-paper-2); border-radius: var(--radius-card); }
+  .label { font-size: var(--text-sm); color: var(--color-muted); font-weight: 500; }
+  .cell-input { width: 5.5rem; text-align: right; padding: var(--space-2xs) var(--space-xs); border: var(--rule-hair) solid var(--color-edge); border-radius: var(--radius-control); background: var(--color-paper); color: var(--color-ink); }
+  .cell-input:hover { border-color: var(--color-muted); }
+  .cell-input:disabled { background: transparent; border-color: transparent; color: var(--color-ink-2); cursor: not-allowed; }
 
-/* Variance ledger: expandable item sections and the expected/actual chart, on the Night Shift tokens */
-@layer components {
-  :root:not([data-theme="light"]) { --expected: #59646d; }
-  :root { --actual: var(--color-amber); }
-  .lg-box { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: 14px; overflow: hidden; margin-bottom: 14px; }
-  .lg-track { background: var(--color-paper); height: 6px; border-radius: 2px; overflow: hidden; position: relative; }
+  /* The weekly loop: five steps on one ruled rail. The rule's colour is the step's state. */
+  .loop { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-md); }
+  .loop > li { border-top: 2px solid var(--color-line-strong); padding-top: var(--space-sm); min-width: 0; }
+  .loop > li[data-state="done"] { border-top-color: var(--color-ok); }
+  .loop > li[data-state="todo"] { border-top-color: var(--color-accent); }
+  @media (max-width: 63.99rem) { .loop { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 39.99rem) { .loop { grid-template-columns: minmax(0, 1fr); } }
+
+  /* Sibling figures, parted by a hairline, not boxed. */
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: var(--rule-hair) solid var(--color-line); }
+  .stats > div { padding: var(--space-md); border-left: var(--rule-hair) solid var(--color-line); min-width: 0; }
+  .stats > div:first-child { border-left: 0; padding-left: 0; }
+  @media (max-width: 63.99rem) {
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stats > div:nth-child(odd) { border-left: 0; padding-left: 0; }
+    .stats > div:nth-child(n + 3) { border-top: var(--rule-hair) solid var(--color-line); }
+  }
+
+  /* Variance ledger: one ruled row per item, columns shared with the head row. */
+  .lg-cols { display: grid; gap: var(--space-sm); align-items: center; }
+  @media (min-width: 48rem) { .lg-cols { grid-template-columns: minmax(0, 1fr) 8.5rem 8.5rem 9.5rem; } }
+  .lg-head { border-bottom: var(--rule-hair) solid var(--color-line-strong); padding-block: var(--space-xs); font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); }
+  .lg-row { border-bottom: var(--rule-hair) solid var(--color-line); }
+  .lg-row > summary { list-style: none; cursor: pointer; padding-block: var(--space-sm); }
+  .lg-row > summary::-webkit-details-marker { display: none; }
+  .lg-row > summary:hover { background: color-mix(in srgb, var(--color-raised) 60%, transparent); }
+  .lg-row[open] .lg-arrow { transform: rotate(90deg); }
+  .lg-group > summary { list-style: none; cursor: pointer; padding-block: var(--space-sm); font-size: var(--text-sm); color: var(--color-muted); }
+  .lg-group > summary::-webkit-details-marker { display: none; }
+  .lg-group > summary:hover { color: var(--color-ink); }
+  .lg-group[open] > summary .lg-arrow { transform: rotate(90deg); }
+  .lg-track { background: var(--color-line); height: 6px; border-radius: 2px; overflow: hidden; position: relative; }
   .lg-fill { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
   .lg-e { background: var(--expected); }
   .lg-a { background: var(--actual); }
   .lg-zero { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--color-muted); }
-  details.lg-box > summary { list-style: none; cursor: pointer; }
-  details.lg-box > summary::-webkit-details-marker { display: none; }
-  details.lg-box[open] .lg-arrow { transform: rotate(90deg); }
-  .lg-balances > div { border-left: 1px solid var(--color-line); padding-left: 12px; min-width: 0; }
-  table.lg-links { width: 100%; border-collapse: collapse; font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
-  table.lg-links th { font-size: 11px; font-weight: 400; color: var(--color-muted); padding: 9px 6px; white-space: nowrap; }
-  table.lg-links td { border-top: 1px solid var(--color-line); padding: 8px 6px; white-space: nowrap; }
+  .lg-track-tall { height: 10px; }
+  .lg-rail { position: relative; height: 14px; }
+  .lg-rail::before { content: ""; position: absolute; inset-inline: 0; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--color-line); }
+  .lg-link { position: absolute; top: 50%; height: 2px; margin-top: -1px; background: var(--color-muted); }
+  .lg-dot { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; box-shadow: 0 0 0 2px var(--color-paper-2); }
+  /* Sales vs stock difference scatter. Marks wear status colours; text stays in ink tokens. */
+  .sc-band { fill: color-mix(in oklab, var(--color-ok) 14%, transparent); }
+  .sc-grid { stroke: var(--color-line); stroke-width: 1; }
+  .sc-zero { stroke: var(--color-ink-2); stroke-width: 1.25; }
+  .sc-axis { stroke: var(--color-line-strong); stroke-width: 1; }
+  .sc-tick { fill: var(--color-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .sc-label { fill: var(--color-muted); font-size: 11px; }
+  .sc-band-label { fill: var(--color-ok); font-size: 11px; font-weight: 500; }
+  .sc-halo { paint-order: stroke; stroke: var(--color-paper-2); stroke-width: 4px; stroke-linejoin: round; }
+  .sc-dot { stroke: var(--color-paper-2); stroke-width: 1.5; transition: r var(--dur-micro) var(--ease-out); }
+  g[role="button"]:focus-visible { outline: none; }
+  g[role="button"]:focus-visible .sc-dot { stroke: var(--color-ink); stroke-width: 2; }
+  .sc-leader { stroke: var(--color-muted); stroke-width: 1; }
+  .sc-callout { fill: var(--color-paper-2); stroke-width: 1.5; }
+  .sc-callout-text { fill: var(--color-ink); font-size: 11px; font-weight: 600; }
+  .sc-key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+  .sc-tip { position: absolute; z-index: var(--z-tooltip); pointer-events: none; min-width: 12rem; max-width: 16rem; padding: var(--space-xs) var(--space-sm); border-radius: var(--radius-control); background: var(--color-raised); border: var(--rule-hair) solid var(--color-line-strong); box-shadow: var(--shadow-card); font-size: var(--text-xs); }
+  .sc-dl { display: grid; grid-template-columns: auto auto; gap: 1px var(--space-sm); margin-top: var(--space-2xs); font-variant-numeric: tabular-nums; }
+  .sc-dl dt { color: var(--color-muted); }
+  .sc-dl dd { text-align: right; color: var(--color-ink); }
+  table.lg-links { width: 100%; border-collapse: collapse; font-size: var(--text-xs); text-align: right; font-variant-numeric: tabular-nums; }
+  table.lg-links th { font-weight: 400; color: var(--color-muted); padding: var(--space-xs); white-space: nowrap; }
+  table.lg-links td { border-top: var(--rule-hair) solid var(--color-line); padding: var(--space-xs); white-space: nowrap; }
   table.lg-links :is(th, td):first-child { text-align: left; padding-left: 0; white-space: normal; }
   table.lg-links :is(th, td):last-child { padding-right: 0; }
   table.lg-links tfoot td { font-weight: 500; }
-  .lg-chip { display: inline-block; font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap; font-weight: 500; }
+  .lg-chip { display: inline-block; font-size: var(--text-xs); border-radius: var(--radius-chip); padding: 0 var(--space-xs); white-space: nowrap; font-weight: 500; }
 }

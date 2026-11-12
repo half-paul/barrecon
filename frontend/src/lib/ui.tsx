@@ -5,8 +5,8 @@ import { AreaScope, useReadOnly } from "./auth";
 /** Primary and danger buttons change things, so they switch off on a view-only page. A quiet button that changes things says so with `edit`. */
 export function Button({ kind = "primary", className = "", edit, ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: "primary" | "quiet" | "danger"; edit?: boolean }) {
   const blocked = useReadOnly() && (edit || kind !== "quiet");
-  const base = "inline-flex items-center gap-1 px-3.5 py-1.5 rounded-[10px] text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed";
-  const k = kind === "primary" ? "bg-accent text-accent-ink font-semibold hover:bg-accent-deep" : kind === "danger" ? "bg-danger-soft text-danger hover:brightness-125" : "bg-surface border border-line text-ink hover:bg-raised";
+  const base = "ctl inline-flex items-center justify-center gap-1 h-9 px-3.5 rounded-control text-sm font-medium whitespace-nowrap disabled:opacity-55 disabled:cursor-not-allowed";
+  const k = kind === "primary" ? "bg-accent text-accent-ink font-semibold hover:bg-accent-deep" : kind === "danger" ? "bg-danger-soft text-danger hover:brightness-125" : "border border-line-strong text-ink hover:bg-raised";
   return <button className={`${base} ${k} ${className}`} {...p} disabled={p.disabled || blocked} title={blocked ? "View only" : p.title} />;
 }
 
@@ -20,7 +20,10 @@ export function Field({ label, children, hint }: { label: string; children: Reac
   );
 }
 
-export const inputCls = "px-2.5 py-1.5 border border-line rounded-lg bg-surface text-ink hover:border-line-strong";
+export const inputCls = "ctl h-9 px-2.5 border border-edge rounded-control bg-paper text-ink hover:border-muted disabled:opacity-55";
+
+/** An empty cell: nothing to see, but a screen reader still hears that it is empty. */
+export const Nil = () => <span className="sr-only">none</span>;
 
 /** A text box with a list to pick from. Unlike <datalist>, a box that already holds a pick lists every option again
  *  when tapped (a datalist filters down to the one already chosen), and it works the same on phones.
@@ -44,8 +47,8 @@ export function Combobox({ value, onChange, options, placeholder, className = ""
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [open]);
-  // the list lives in a portal at fixed position, so a scrolling table (overflow: auto) can't clip it;
-  // it follows the box on scroll/resize and opens upward when there's no room below
+  // the list lives in a portal at fixed position, so a scrolling table (overflow: auto) can’t clip it;
+  // it follows the box on scroll/resize and opens upward when there’s no room below
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
@@ -89,7 +92,7 @@ export function Combobox({ value, onChange, options, placeholder, className = ""
         <button type="button" tabIndex={-1} aria-label="Clear" onClick={() => { onChange(""); show(); input.current?.focus(); }}
           className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 grid place-items-center text-muted hover:text-ink">✕</button>)}
       {open && createPortal(
-        <ul ref={list} id={id} role="listbox" style={pos} className="z-50 overflow-y-auto rounded-[10px] border border-line bg-surface shadow-lg py-1">
+        <ul ref={list} id={id} role="listbox" style={pos} className="z-50 overflow-y-auto rounded-control border border-line bg-surface shadow-lg py-1">
           {shown.length === 0 && <li className="px-3 py-2 text-sm text-muted">Nothing matches.</li>}
           {shown.map((o, i) => (
             // mousedown would blur the box before the click lands
@@ -106,11 +109,13 @@ export function Page({ title, sub, actions, children, area }: { title: string; s
   return (
     <AreaScope area={area}>
     <div className="px-4 sm:px-7 py-5 sm:py-7 max-w-[1280px] mx-auto">
-      <div className="flex items-end justify-between mb-5 sm:mb-6 gap-x-4 gap-y-3 flex-wrap">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="text-[26px] font-semibold leading-tight">{title}</h1>
-          {viewOnly && <span className="text-xs rounded-full border border-line px-2 py-0.5 text-muted">View only</span>}
-          {sub && <span className="text-muted">{sub}</span>}
+      <div className="flex items-end justify-between mb-5 sm:mb-6 gap-x-6 gap-y-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="text-2xl font-semibold leading-tight max-w-none">{title}</h1>
+            {viewOnly && <span className="text-xs rounded-chip border border-line-strong px-2 py-0.5 text-muted">View only</span>}
+          </div>
+          {sub && <div className="text-muted mt-1">{sub}</div>}
         </div>
         <div className="flex gap-2 items-center flex-wrap">{actions}</div>
       </div>
@@ -122,10 +127,10 @@ export function Page({ title, sub, actions, children, area }: { title: string; s
 
 export function Notice({ kind = "info", children }: { kind?: "info" | "error" | "ok"; children: ReactNode }) {
   const c = kind === "error" ? "bg-danger-soft text-danger border-danger/30" : kind === "ok" ? "bg-ok-soft text-ok border-ok/30" : "bg-amber-soft text-ink border-accent/30";
-  return <div className={`rounded-lg border px-3 py-2 text-sm mb-4 ${c}`}>{children}</div>;
+  return <div className={`rounded-control border px-3 py-2 text-sm mb-4 ${c}`}>{children}</div>;
 }
 
-/** Placeholder rows while a page's data loads, so an empty page is never mistaken for "no data". */
+/** Placeholder rows while a page’s data loads, so an empty page is never mistaken for "no data". */
 export function Loading({ rows = 6, label = "Loading…" }: { rows?: number; label?: string }) {
   return (
     <div role="status" aria-live="polite" className="card p-4 mb-4">
@@ -146,7 +151,7 @@ export function Flash({ kind, children, onClose }: { kind: "ok" | "error"; child
   }, [kind, children]); // eslint-disable-line react-hooks/exhaustive-deps
   const c = kind === "error" ? "bg-danger-soft text-danger border-danger/40" : "bg-ok-soft text-ok border-ok/40";
   return (
-    <div role={kind === "error" ? "alert" : "status"} className={`fixed z-50 bottom-4 inset-x-4 sm:left-auto sm:right-6 sm:max-w-md rounded-[12px] border shadow-lg px-4 py-3 text-sm flex gap-3 items-start ${c}`}>
+    <div role={kind === "error" ? "alert" : "status"} className={`fixed z-50 bottom-4 inset-x-4 sm:left-auto sm:right-6 sm:max-w-md rounded-control border shadow-lg px-4 py-3 text-sm flex gap-3 items-start ${c}`}>
       <div className="flex-1 min-w-0 break-words">{children}</div>
       <button type="button" onClick={onClose} aria-label="Close message" className="shrink-0 -m-1 p-1 opacity-70 hover:opacity-100">✕</button>
     </div>
@@ -164,18 +169,18 @@ export function Lightbox({ src, alt, caption, onClose }: { src: string; alt: str
   }, [onClose]);
   return (
     <div role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-3 sm:p-8">
+      className="fixed inset-0 z-50 bg-scrim/90 flex flex-col items-center justify-center p-3 sm:p-8">
       <button type="button" onClick={onClose} aria-label="Close photo" autoFocus
-        className="absolute top-2 right-2 sm:top-4 sm:right-4 w-11 h-11 rounded-full bg-black/50 text-white text-xl hover:bg-black/80">✕</button>
+        className="absolute top-2 right-2 sm:top-4 sm:right-4 w-11 h-11 rounded-full bg-scrim/60 text-on-scrim text-xl hover:bg-scrim/90">✕</button>
       <img src={src} alt={alt} onClick={(e) => e.stopPropagation()}
-        className="max-w-full max-h-[calc(100dvh-6rem)] object-contain rounded-lg shadow-2xl" />
-      {caption && <div className="mt-3 text-sm text-white/85 text-center" onClick={(e) => e.stopPropagation()}>{caption}</div>}
+        className="max-w-full max-h-[calc(100dvh-6rem)] object-contain rounded-control shadow-2xl" />
+      {caption && <div className="mt-3 text-sm text-on-scrim text-center" onClick={(e) => e.stopPropagation()}>{caption}</div>}
     </div>
   );
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="text-muted py-10 text-center border border-dashed border-line rounded-[14px]">{children}</div>;
+  return <div className="card text-muted px-5 py-8">{children}</div>;
 }
 
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
@@ -189,7 +194,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
 export function FileButton({ label, accept = ".xlsx", onFile, busy }: { label: string; accept?: string; onFile: (f: File) => void; busy?: boolean }) {
   const blocked = useReadOnly();
   return (
-    <label title={blocked ? "View only" : undefined} className={`inline-flex items-center px-3 py-1.5 rounded-[10px] text-sm font-medium bg-surface border border-line cursor-pointer hover:bg-raised ${busy || blocked ? "opacity-50 pointer-events-none" : ""}`}>
+    <label title={blocked ? "View only" : undefined} className={`ctl inline-flex items-center h-9 px-3.5 rounded-control text-sm font-medium whitespace-nowrap border border-line-strong cursor-pointer hover:bg-raised ${busy || blocked ? "opacity-55 pointer-events-none" : ""}`}>
       {busy ? "Uploading…" : label}
       <input type="file" accept={accept} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.currentTarget.value = ""; }} />
     </label>

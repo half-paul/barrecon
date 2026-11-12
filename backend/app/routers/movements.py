@@ -8,7 +8,8 @@ from ..auth import perm
 from ..db import get_db
 from ..models import MOVEMENT_KINDS, InventoryItem, StockMovement
 from ..schemas import DeliveryIn, MovementIn, MovementOut
-from ..seed import default_location
+from ..tenancy import business_id
+from ..services import deliveries as dlv
 from ..services import inventory as inv
 from ..services import xlsx_io
 
@@ -48,9 +49,9 @@ def template(db: Session = Depends(get_db)):
 
 @router.post("/import")
 async def import_movements(file: UploadFile, db: Session = Depends(get_db)):
-    loc = default_location(db)
+    loc = business_id(db)
     try:
-        res = xlsx_io.import_movements(db, await file.read(), file.filename or "movements.xlsx", loc.id)
+        res = xlsx_io.import_movements(db, await file.read(), file.filename or "movements.xlsx", loc)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     return res.summary()
@@ -58,12 +59,12 @@ async def import_movements(file: UploadFile, db: Session = Depends(get_db)):
 
 @router.post("", status_code=201)
 def create(body: MovementIn, db: Session = Depends(get_db)):
-    loc = default_location(db)
+    loc = business_id(db)
     it = db.get(InventoryItem, body.item_id)
     if not it:
         raise HTTPException(400, "unknown item")
     try:
-        m, outcome = inv.add_movement(db, location_id=loc.id, item=it, kind=body.kind, occurred_at=body.occurred_at,
+        m, outcome = inv.add_movement(db, location_id=loc, item=it, kind=body.kind, occurred_at=body.occurred_at,
                                       external_ref=body.external_ref, packs=body.packs, qty=body.qty,
                                       pack_cost=body.pack_cost, note=body.note, source="portal")
     except inv.InventoryError as e:
@@ -75,27 +76,32 @@ def create(body: MovementIn, db: Session = Depends(get_db)):
 
 @router.post("/batch")
 def create_batch(body: DeliveryIn, db: Session = Depends(get_db)):
-    """Record one invoice for many items at once: every line is saved, or none is."""
-    loc = default_location(db)
+    """One sheet for many items: every line is saved, or none is. A delivery becomes a posted delivery
+    (listed under Deliveries); saving the same reference on the same day again updates it. Other kinds are
+    recorded as one stock movement per line."""
+    loc = business_id(db)
     ids = [ln.item_id for ln in body.lines]
     if len(set(ids)) != len(ids):
         raise HTTPException(400, "an item appears twice on this delivery")
-    outcomes = {"inserted": 0, "duplicate": 0, "superseded": 0}
+    items = {i: db.get(InventoryItem, i) for i in ids}
+    if missing := [i for i, it in items.items() if it is None]:
+        raise HTTPException(400, f"unknown item {missing[0]}")
     try:
+        if body.kind == "delivery":
+            d, outcome = dlv.record_sheet(db, location_id=loc, source="sheet", occurred_at=body.occurred_at,
+                                          ref=body.external_ref, store=body.store, note=body.note,
+                                          lines=[(items[ln.item_id], ln.packs, ln.pack_cost) for ln in body.lines])
+            db.commit()
+            return {"outcome": outcome, "delivery_id": d.id, "lines": len(body.lines)}
+        outcomes = {"inserted": 0, "duplicate": 0, "superseded": 0}
         for ln in body.lines:
-            it = db.get(InventoryItem, ln.item_id)
-            if not it:
-                raise HTTPException(400, f"unknown item {ln.item_id}")
-            _, outcome = inv.add_movement(db, location_id=loc.id, item=it, kind=body.kind, occurred_at=body.occurred_at,
-                                          external_ref=body.external_ref, packs=ln.packs, pack_cost=ln.pack_cost,
-                                          note=body.note, source="portal")
+            _, outcome = inv.add_movement(db, location_id=loc, item=items[ln.item_id], kind=body.kind,
+                                          occurred_at=body.occurred_at, external_ref=body.external_ref,
+                                          packs=ln.packs, note=body.note, source="portal")
             outcomes[outcome] += 1
-    except inv.InventoryError as e:
+    except (inv.InventoryError, dlv.DeliveryError) as e:
         db.rollback()
         raise HTTPException(400, str(e)) from None
-    except HTTPException:
-        db.rollback()
-        raise
     db.commit()
     return outcomes
 

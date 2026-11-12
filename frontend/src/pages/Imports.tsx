@@ -53,7 +53,7 @@ export default function Imports() {
   };
 
   const removeBatch = async (b: Batch) => {
-    if (!confirm(`Remove this Item Sales import (${b.file_name}) and the sales it brought in? Variance for those dates will have no sales until they are imported again.`)) return;
+    if (!confirm(`Remove this Item Sales import (${b.file_name}) and the sales it brought in? Stock vs sales for those dates will have no sales until they are imported again.`)) return;
     setBusy(true);
     try {
       const r = await api.del<{ deleted: number }>(`/api/imports/${b.id}`);
@@ -68,7 +68,7 @@ export default function Imports() {
       {msg && <Flash kind={msg.kind} onClose={() => setMsg(null)}>{msg.text}</Flash>}
       <section className="card mb-8 p-5">
         <h2 className="font-semibold mb-1">Your existing inventory workbook</h2>
-        <p className="text-sm text-muted mb-3">The monthly "To Order Inventory List" file. Items, par levels and every weekly "On hand" column come in as posted counts; orders that can be read ("2 case", "3 bottles") come in as deliveries; everything else is listed for you to decide. Nothing is written until you confirm the preview. Running it again later is safe — existing counts and deliveries are left alone.</p>
+        <p className="text-sm text-muted mb-3 max-w-[75ch]">The monthly "To Order Inventory List" file. Items, par levels and every weekly "On hand" column come in as posted counts; orders that can be read ("2 case", "3 bottles") come in as deliveries; everything else is listed for you to decide. Nothing is written until you confirm the preview. Running it again later is safe: existing counts and deliveries are left alone.</p>
         <FileButton label={file ? `Choose a different file` : "Choose workbook"} onFile={choose} busy={busy} />
         {preview && (
           <div className="mt-4 text-sm">
@@ -95,7 +95,7 @@ export default function Imports() {
 
       <AreaScope area="swype_items"><section className="card mb-8 p-5">
         <h2 className="font-semibold mb-1">Swype item list</h2>
-        <p className="text-sm text-muted mb-3">The CSV from Swype → Import/Export → Export Item. Adds every Swype item # to the Swype menu so it can get a recipe before it first sells. Swype items are not stock items and have their own numbers: nothing here creates or changes a stock item. A recipe is what links a Swype item to the stock items it uses (one or several, each with its own portion). Sales imports add the items they list the same way.</p>
+        <p className="text-sm text-muted mb-3 max-w-[75ch]">The CSV from Swype → Import/Export → Export Item. Adds every Swype item # to the Swype menu so it can get a recipe before it first sells. Swype items are not stock items and have their own numbers: nothing here creates or changes a stock item. A recipe is what links a Swype item to the stock items it uses (one or several, each with its own portion). Sales imports add the items they list the same way.</p>
         <FileButton label={catFile ? "Choose a different file" : "Choose item CSV"} accept=".csv" onFile={chooseCatalogue} busy={busy} />
         {catPreview && (
           <div className="mt-4 text-sm">
@@ -113,7 +113,7 @@ export default function Imports() {
         <h2 className="font-semibold mb-2">To review</h2>
         {issues.data && issues.data.length === 0 && <Empty>Nothing waiting.</Empty>}
         {issues.data && issues.data.length > 0 && (
-          <div className="card table-box px-2"><table className="grid">
+          <div className="table-box"><table className="grid">
             <thead><tr><th>What</th><th>Detail</th><th>Raised</th><th></th></tr></thead>
             <tbody>{issues.data.map((i) => (
               <tr key={i.id}><td className="whitespace-nowrap">{i.code.replace(/_/g, " ")}</td><td>{i.detail?.detail}</td><td className="text-muted whitespace-nowrap">{dt(i.created_at)}</td>
@@ -126,7 +126,7 @@ export default function Imports() {
         <h2 className="font-semibold mb-2">Import history</h2>
         {batches.data && batches.data.length === 0 && <Empty>No imports yet.</Empty>}
         {batches.data && batches.data.length > 0 && (
-          <div className="card table-box px-2"><table className="grid">
+          <div className="table-box"><table className="grid">
             <thead><tr><th>When</th><th>What</th><th>File</th><th className="r">Rows</th><th className="r">New</th><th className="r">Duplicate</th><th className="r">Errors</th><th>Result</th><th></th></tr></thead>
             <tbody>{batches.data.flatMap((b) => [
               <tr key={b.id}><td className="whitespace-nowrap">{dt(b.imported_at)}</td>

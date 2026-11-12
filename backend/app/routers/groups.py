@@ -24,7 +24,7 @@ def _out(db: Session, g: ItemGroup) -> GroupOut:
 
 
 def _get(db: Session, name: str) -> ItemGroup:
-    g = db.get(ItemGroup, name)
+    g = db.query(ItemGroup).filter(ItemGroup.name == name).one_or_none()
     if not g:
         raise HTTPException(404, f"no group {name}")
     return g

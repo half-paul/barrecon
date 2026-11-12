@@ -24,6 +24,7 @@ from . import settings_svc
 TOTAL_TOLERANCE = Decimal("0.05")  # rounding on a receipt
 CENT, TENTH_CENT = Decimal("0.01"), Decimal("0.0001")
 NEVER_STOCK = ("container deposit",)  # receipt lines that stay for the totals but are never stock
+MOVEMENT_SOURCE = {"receipt": "receipt", "sheet": "xlsx", "manual": "portal"}  # Delivery.source -> movement source
 
 
 class DeliveryError(ValueError):
@@ -273,9 +274,10 @@ def post(db: Session, d: Delivery) -> int:
             cost = (sum((Decimal(ln.line_total) for ln in lns), Decimal(0)) / packs).quantize(TENTH_CENT)
         m, _ = inv.add_movement(db, location_id=d.location_id, item=db.get(InventoryItem, item_id), kind="delivery",
                                 occurred_at=d.occurred_at, external_ref=_ref(d), packs=packs, pack_cost=cost,
-                                source="receipt", note=note[:1000])
+                                source=MOVEMENT_SOURCE.get(d.source, "receipt"), note=note[:1000])
         m.delivery_id = d.id
-    _learn(db, d)
+    if d.source == "receipt":  # sheet lines are stock item names, nothing a store prints
+        _learn(db, d)
     d.status = "posted"
     d.posted_at = utcnow()
     db.flush()
@@ -320,6 +322,62 @@ def reopen(db: Session, d: Delivery) -> None:
     d.status = "draft"
     d.posted_at = None
     db.flush()
+
+
+# ---------- deliveries entered on a sheet ----------
+
+SHEET_SOURCES = ("sheet",)  # the uploaded deliveries sheet and the quick sheet in the portal
+
+
+def record_sheet(db: Session, *, location_id: str, source: str, occurred_at: datetime, ref: str,
+                 store: str | None, note: str | None,
+                 lines: list[tuple[InventoryItem, Decimal, Decimal | None]]) -> tuple[Delivery, str]:
+    """Record a delivery entered on a sheet (item, packs, pack cost per line) and post it at once.
+
+    The same reference on the same local day from the same kind of sheet is the same delivery: identical
+    content is left alone ('duplicate'); changed content replaces its lines and posts again ('superseded'),
+    the old movements kept as retracted history. A new one is 'inserted'."""
+    if source not in SHEET_SOURCES:
+        raise DeliveryError(f"unknown sheet source {source!r}")
+    ref = (ref or "").strip()[:100]
+    if not ref:
+        raise DeliveryError("a delivery needs a reference (invoice number)")
+    if not lines:
+        raise DeliveryError("no line puts anything into stock")
+    occurred_at = inv.to_utc(occurred_at)
+    tz = ZoneInfo(settings.timezone)
+    day = occurred_at.astimezone(tz).date()
+    new = [(it, Decimal(p), None if c is None else (Decimal(p) * Decimal(c)).quantize(CENT)) for it, p, c in lines]
+    store = (store or "").strip()[:200] or None
+    existing = next((d for d in db.scalars(select(Delivery).where(
+        Delivery.location_id == location_id, Delivery.source == source, Delivery.receipt_no == ref,
+        Delivery.status != "void")) if d.occurred_at and inv.to_utc(d.occurred_at).astimezone(tz).date() == day), None)
+    if existing is not None:
+        def key(rows):
+            return sorted((i, Decimal(p).normalize(), None if t is None else Decimal(t)) for i, p, t in rows)
+        same = (existing.status == "posted" and inv.to_utc(existing.occurred_at) == occurred_at
+                and (store is None or existing.store == store) and (existing.note or None) == (note or None)
+                and key((ln.item_id, ln.packs, ln.line_total) for ln in existing.lines if not ln.skip)
+                == key((it.id, p, t) for it, p, t in new))
+        if same:
+            return existing, "duplicate"
+        if existing.status == "posted":
+            reopen(db, existing)
+        d, outcome = existing, "superseded"
+    else:
+        d = Delivery(location_id=location_id, source=source)
+        db.add(d)
+        outcome = "inserted"
+    d.receipt_no, d.occurred_at, d.note = ref, occurred_at, (note or None)
+    d.store = store or d.store or "Deliveries sheet"
+    d.lines.clear()
+    db.flush()
+    for i, (it, p, t) in enumerate(new):
+        d.lines.append(DeliveryLine(position=i, text=it.name[:300], receipt_sku=it.sku[:64], receipt_qty=p,
+                                    line_total=t, item_id=it.id, packs=p, matched_by="sheet"))
+    db.flush()
+    post(db, d)
+    return d, outcome
 
 
 def void(db: Session, d: Delivery) -> None:

@@ -19,6 +19,9 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
+      PLATFORM_ADMIN_USERNAME: ${PLATFORM_ADMIN_USERNAME:-platform}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD}
+      FIRST_TENANT_NAME: ${FIRST_TENANT_NAME:-Caffe Barney}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-barrecon}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-barrecon}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-to-a-long-random-string}
@@ -26,6 +29,17 @@ services:
       SWYPE_EMAIL: ${SWYPE_EMAIL:-}
       SWYPE_PASSWORD: ${SWYPE_PASSWORD:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ADMIN_MFA_REQUIRED: ${ADMIN_MFA_REQUIRED:-false}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
+      MAILGUN_API_BASE: ${MAILGUN_API_BASE:-https://api.mailgun.net}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_TLS: ${SMTP_TLS:-true}
+      MAIL_FROM: ${MAIL_FROM:-}
       TZ: ${TZ:-America/Vancouver}
       HOST: 0.0.0.0
     ports:

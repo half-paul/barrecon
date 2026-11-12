@@ -9,10 +9,10 @@ from ..auth import perm
 from ..db import get_db
 from ..models import Delivery, DeliveryReceipt, StockMovement
 from ..schemas import ReceiptDeliveryIn
-from ..seed import default_location
+from ..tenancy import business_id
 from ..services import deliveries as dlv
 from ..services import inventory as inv
-from ..services import receipts
+from ..services import receipts, usage
 
 router = APIRouter(prefix="/api/deliveries", tags=["deliveries"], dependencies=[perm("deliveries")])
 
@@ -79,8 +79,11 @@ def reading():
 
 
 def _read_into(db: Session, d: Delivery, data: bytes, content_type: str) -> None:
+    """Every call to Claude is counted for the tenant (services/usage.py), and refused once its monthly cap is used."""
     try:
-        dlv.apply_read(db, d, receipts.read(data, content_type))
+        if msg := usage.over_cap(db):
+            raise receipts.ReceiptReadError(msg)
+        dlv.apply_read(db, d, receipts.read(data, content_type, meter=lambda model, u, ok: usage.record(db, "receipt", model, u, ok, d.id)))
     except receipts.ReceiptReadError as e:
         d.read_error = str(e)
 
@@ -95,7 +98,7 @@ async def upload_receipt(file: UploadFile, db: Session = Depends(get_db)):
         raise HTTPException(400, str(e)) from None
 
     def work():
-        d = Delivery(location_id=default_location(db).id, status="draft", source="receipt")
+        d = Delivery(location_id=business_id(db), status="draft", source="receipt")
         d.receipt = DeliveryReceipt(content_type=ctype, file_name=file.filename, data=data)
         db.add(d)
         db.flush()
@@ -109,7 +112,7 @@ async def upload_receipt(file: UploadFile, db: Session = Depends(get_db)):
 @router.post("", status_code=201)
 def create_manual(db: Session = Depends(get_db)):
     """A delivery with no receipt (or the receipt added later), entered by hand."""
-    d = Delivery(location_id=default_location(db).id, status="draft", source="manual")
+    d = Delivery(location_id=business_id(db), status="draft", source="manual")
     db.add(d)
     db.commit()
     db.refresh(d)

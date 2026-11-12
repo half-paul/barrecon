@@ -75,6 +75,24 @@ def test_settings(client):
     assert s["variance_view_added"] == [] and s["variance_view_removed"] == ["b"]
 
 
+def test_my_prefs_are_per_login(client):
+    """The chart a login picked on Stock vs sales is its own: another login in the same business keeps the default."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    assert client.get("/api/settings/me").json() == {"variance_chart_style": "bars"}
+    assert client.put("/api/settings/me", json={"variance_chart_style": "gap"}).json() == {"variance_chart_style": "gap"}
+    assert client.put("/api/settings/me", json={}).json() == {"variance_chart_style": "gap"}
+    assert client.put("/api/settings/me", json={"variance_chart_style": "pie"}).status_code == 422
+    r = client.post("/api/users", json={"username": "viewer2", "display_name": "Viewer", "password": "Bar-stock-77",
+                                        "permissions": {"variance": "view"}})
+    assert r.status_code == 201, r.text
+    with TestClient(app) as other:
+        assert other.post("/api/auth/login", json={"username": "viewer2", "password": "Bar-stock-77"}).status_code == 200
+        assert other.get("/api/settings/me").json() == {"variance_chart_style": "bars"}
+        assert other.put("/api/settings/me", json={"variance_chart_style": "difference"}).status_code == 200
+    assert client.get("/api/settings/me").json() == {"variance_chart_style": "gap"}
+
+
 def test_patch_item_sku(client):
     base = {"category": "Spirits", "stock_unit": "ml", "pack_name": "bottle", "pack_size": 750}
     a = client.post("/api/items", json={"sku": "SWYPE-00000380", "name": "Forty Creek", **base}).json()

@@ -46,7 +46,7 @@ def create(db: Session, data: dict) -> ItemGroup:
     name = data["name"].strip()
     if not name:
         raise InventoryError("name is required")
-    if db.get(ItemGroup, name):
+    if db.query(ItemGroup).filter(ItemGroup.name == name).one_or_none():
         raise InventoryError(f"group {name} already exists")
     _check(db, data)
     g = ItemGroup(**{**data, "name": name})
@@ -62,12 +62,14 @@ def update(db: Session, g: ItemGroup, data: dict) -> ItemGroup:
     for f in PACK_FIELDS:
         if f in data and (data[f] is not None or f == "pack_name"):
             setattr(g, f, data[f])
+    if data.get("sheet_in_cases") is not None:
+        g.sheet_in_cases = data["sheet_in_cases"]
     if new != g.name:
-        if db.get(ItemGroup, new):
+        if db.query(ItemGroup).filter(ItemGroup.name == new).one_or_none():
             raise InventoryError(f"group {new} already exists")
         old = g.name
         fresh = ItemGroup(name=new, stock_unit=g.stock_unit, pack_name=g.pack_name, pack_size=g.pack_size,
-                          case_size=g.case_size, created_at=g.created_at)
+                          case_size=g.case_size, sheet_in_cases=g.sheet_in_cases, created_at=g.created_at)
         for it in _items(db, old):
             it.category = new
         db.delete(g)
@@ -80,7 +82,7 @@ def update(db: Session, g: ItemGroup, data: dict) -> ItemGroup:
 
 def delete(db: Session, g: ItemGroup, move_to: str | None) -> int:
     """Remove a group. Its items move to another group, or become ungrouped. Returns how many moved."""
-    if move_to is not None and move_to != g.name and db.get(ItemGroup, move_to) is None:
+    if move_to is not None and move_to != g.name and db.query(ItemGroup).filter(ItemGroup.name == move_to).one_or_none() is None:
         raise InventoryError(f"unknown group {move_to}")
     items = _items(db, g.name)
     for it in items:

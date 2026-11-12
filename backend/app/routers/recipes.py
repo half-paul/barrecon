@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import perm
 from ..db import get_db
-from ..seed import default_location
+from ..tenancy import business_id
 from ..services import recipe_import, recipe_match
 from ..services import recipes as rec
 from ..services import settings_svc
@@ -18,7 +18,8 @@ router = APIRouter(prefix="/api/recipes", tags=["recipes"], dependencies=[perm("
 
 
 class RecipeLineIn(BaseModel):
-    item_id: str
+    item_id: str | None = None  # one item; or item_ids: the portion comes out of any one of them
+    item_ids: list[str] = []
     qty: Decimal = Field(gt=0)
     unit: str = "oz"
 
@@ -51,18 +52,18 @@ class MatchApproveIn(BaseModel):
 
 @router.get("/menu")
 def menu(db: Session = Depends(get_db)):
-    return rec.menu(db, default_location(db).id)
+    return rec.menu(db, business_id(db))
 
 
 @router.post("/suggest-pours")
 def suggest_pours(body: SuggestIn, db: Session = Depends(get_db)):
-    return rec.suggest_pours(db, default_location(db).id, single_oz=body.single_oz, double_oz=body.double_oz,
+    return rec.suggest_pours(db, business_id(db), single_oz=body.single_oz, double_oz=body.double_oz,
                              apply=body.apply)
 
 
 @router.get("/match")
 def match_queue(db: Session = Depends(get_db)):
-    return recipe_match.queue(db, default_location(db).id)
+    return recipe_match.queue(db, business_id(db))
 
 
 @router.post("/match/approve")
@@ -78,7 +79,7 @@ def match_approve(body: MatchApproveIn, db: Session = Depends(get_db)):
 
 @router.post("/no-stock")
 def no_stock(db: Session = Depends(get_db)):
-    n = recipe_match.apply_no_stock(db, default_location(db).id)
+    n = recipe_match.apply_no_stock(db, business_id(db))
     db.commit()
     return {"saved": n}
 

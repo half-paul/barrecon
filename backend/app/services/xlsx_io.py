@@ -21,13 +21,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import MOVEMENT_KINDS, CountSession, ImportBatch, InventoryItem, Unit
+from ..models import MOVEMENT_KINDS, CountSession, ImportBatch, InventoryItem, ItemGroup, Unit
 from . import inventory as inv
 
 ITEM_COLS = ["sku", "name", "category", "stock_unit", "pack_name", "pack_size", "case_size",
              "pack_cost", "yield_to_unit", "yield_qty", "par_level", "active"]
 COUNT_COLS = ["count_date", "sku", "name", "pack_name", "packs_full", "packs_partial", "note"]
 MOVE_COLS = ["row_id", "date", "sku", "kind", "packs", "qty", "pack_cost", "external_ref", "note"]
+MOVE_OPTIONAL = ["store"]
 
 HEADER_FONT = Font(name="Arial", bold=True, color="FFFFFF")
 HEADER_FILL = PatternFill("solid", fgColor="1F4E79")
@@ -118,8 +119,9 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _rows(ws, cols: list[str]) -> list[tuple[int, dict]]:
-    """Read header-mapped rows. Header match is case-insensitive; extra columns ignored."""
+def _rows(ws, cols: list[str], optional: list[str] = ()) -> list[tuple[int, dict]]:
+    """Read header-mapped rows. Header match is case-insensitive; extra columns ignored; `optional` columns
+    are read when present (None otherwise)."""
     it = ws.iter_rows(values_only=True)
     header = next(it, None)
     if not header:
@@ -132,7 +134,7 @@ def _rows(ws, cols: list[str]) -> list[tuple[int, dict]]:
     for n, r in enumerate(it, start=2):
         if r is None or all(v is None or (isinstance(v, str) and not v.strip()) for v in r):
             continue
-        out.append((n, {c: r[idx[c]] if idx[c] < len(r) else None for c in cols}))
+        out.append((n, {c: r[idx[c]] if c in idx and idx[c] < len(r) else None for c in (*cols, *optional)}))
     return out
 
 
@@ -196,21 +198,26 @@ def counts_template(db: Session, count_date: date | None = None) -> bytes:
 
 
 def movements_template(db: Session) -> bytes:
+    cols = MOVE_COLS + MOVE_OPTIONAL
     wb = Workbook()
     ws = wb.active
     ws.title = "Movements"
-    _style_header(ws, MOVE_COLS, {"row_id": 12, "date": 12, "sku": 14, "kind": 18, "external_ref": 20, "note": 30})
-    ws.append(["D-0001", date.today().isoformat(), "EXAMPLE-SKU", "delivery", 12, None, 32.5, "INV-12345", "example row - delete"])
+    _style_header(ws, cols, {"row_id": 12, "date": 12, "sku": 14, "kind": 18, "external_ref": 20, "note": 30, "store": 24})
+    ws.append([None, date.today().isoformat(), "EXAMPLE-SKU", "delivery", 12, None, 32.5, "INV-12345", "example row - delete",
+               "BC Liquor Store"])
     for row in ws.iter_rows(min_row=2):
         for c in row:
             c.font = FONT
-    dv = DataValidation(type="list", formula1='"' + ",".join(MOVEMENT_KINDS) + '"', allow_blank=False)
+    dv = DataValidation(type="list", formula1='"' + ",".join(MOVEMENT_KINDS) + '"', allow_blank=True)
     ws.add_data_validation(dv)
     dv.add("D2:D1000")
-    _legend(wb, "Movements: one row per delivery / transfer / supplier return / breakage. row_id must be unique "
-                "and never reused (D-0001, D-0002, ...): it is how re-uploads are matched. Give packs OR qty "
-                "(qty is in the item's stock unit). kinds: " + ", ".join(MOVEMENT_KINDS) +
-                ". Spilled drinks are NOT entered here: ring them in Swype with the 'spilled' discount.")
+    _legend(wb, "Deliveries: one row per item delivered. Rows with the same date, external_ref (invoice number) and "
+                "store make one delivery, listed under Deliveries; uploading the sheet again updates it instead of "
+                "adding it twice. packs = bottles / kegs / cans, or cases for items in a group set to 'sheet counts cases' "
+                "on Item groups; or give qty in the item's stock unit (ml, g, each) "
+                "instead. pack_cost is per bottle / keg / can. kind is delivery when blank. Other kinds ("
+                + ", ".join(k for k in MOVEMENT_KINDS if k != "delivery") + ") need a unique row_id. "
+                "Spilled drinks are NOT entered here: ring them in Swype with the 'spilled' discount.")
     return _bytes(wb)
 
 
@@ -360,6 +367,10 @@ def import_counts(db: Session, data: bytes, file_name: str, location_id: str) ->
 
 
 def import_movements(db: Session, data: bytes, file_name: str, location_id: str) -> ImportResult:
+    """The deliveries sheet. Delivery rows become deliveries, one per date + reference (+ store), posted at
+    once and listed under Deliveries like a receipt. Rows of other kinds (transfers, returns, breakage) are
+    recorded as stock movements, matched on re-upload by row_id."""
+    from . import deliveries as dlv
     res = ImportResult("movements")
     digest = sha256(data)
     if _reject_duplicate_file(db, "movements", digest):
@@ -367,14 +378,18 @@ def import_movements(db: Session, data: bytes, file_name: str, location_id: str)
         res.rows.append(RowResult(0, "error", "this exact file was already imported"))
         return res
     wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    rows = _rows(_sheet(wb, "Movements"), MOVE_COLS)
-    parsed, errors, seen = [], [], set()
+    rows = _rows(_sheet(wb, "Movements"), MOVE_COLS, optional=MOVE_OPTIONAL)
+    in_cases = set(db.scalars(select(ItemGroup.name).where(ItemGroup.sheet_in_cases.is_(True))))
+    others, groups, errors, seen = [], {}, [], set()
     for n, r in rows:
         try:
+            kind = str(r["kind"] or "delivery").strip().lower()
+            if kind not in MOVEMENT_KINDS:
+                raise ValueError(f"row {n}: kind {kind!r} must be one of {MOVEMENT_KINDS}")
             rid = str(r["row_id"] or "").strip()
-            if not rid:
-                raise ValueError(f"row {n}: row_id is required")
-            if rid in seen:
+            if kind != "delivery" and not rid:
+                raise ValueError(f"row {n}: row_id is required for a {kind} row")
+            if rid and rid in seen:
                 raise ValueError(f"row {n}: duplicate row_id {rid}")
             seen.add(rid)
             sku = str(r["sku"] or "").strip()
@@ -383,17 +398,35 @@ def import_movements(db: Session, data: bytes, file_name: str, location_id: str)
             item = inv.item_by_sku(db, sku)
             if not item:
                 raise ValueError(f"row {n}: unknown sku {sku!r}")
-            kind = str(r["kind"] or "").strip().lower()
-            if kind not in MOVEMENT_KINDS:
-                raise ValueError(f"row {n}: kind {kind!r} must be one of {MOVEMENT_KINDS}")
             packs = _dec(r["packs"], "packs", n, allow_blank=True)
+            if packs is not None and item.category in in_cases:  # the group's sheet counts cases
+                packs *= Decimal(item.case_size)
             qty = _dec(r["qty"], "qty", n, allow_blank=True)
             if packs is None and qty is None:
                 raise ValueError(f"row {n}: packs or qty required")
-            note = ((f"{r['external_ref']} " if r["external_ref"] else "") + str(r["note"] or "")).strip() or None
-            parsed.append((n, dict(item=item, kind=kind, occurred_at=_date(r["date"], "date", n), external_ref=rid,
-                                   packs=packs, qty=qty, pack_cost=_dec(r["pack_cost"], "pack_cost", n, allow_blank=True),
-                                   note=note)))
+            if packs is None and Decimal(item.pack_size) > 1 and qty < Decimal(item.pack_size):
+                raise ValueError(f"row {n}: qty {qty} is in {item.stock_unit}, less than one {item.pack_name or 'pack'} "
+                                 f"({item.pack_size} {item.stock_unit}); put a count of bottles/kegs in packs instead")
+            if packs is None:
+                packs = qty / Decimal(item.pack_size)
+            if packs <= 0:
+                raise ValueError(f"row {n}: quantity must be more than 0")
+            when = _date(r["date"], "date", n)
+            cost = _dec(r["pack_cost"], "pack_cost", n, allow_blank=True)
+            ref = str(r["external_ref"] or "").strip()
+            note = str(r["note"] or "").strip() or None
+            if kind == "delivery":
+                store = str(r.get("store") or "").strip() or None
+                g = groups.setdefault((when, ref or f"sheet {when.date()}", store), {"rows": [], "lines": {}, "notes": []})
+                if item.id in g["lines"]:
+                    raise ValueError(f"row {n}: {item.name} is on this delivery twice")
+                g["rows"].append(n)
+                g["lines"][item.id] = (item, packs, cost)
+                if note and note not in g["notes"]:
+                    g["notes"].append(note)
+            else:
+                others.append((n, dict(item=item, kind=kind, occurred_at=when, external_ref=rid, packs=packs,
+                                       pack_cost=cost, note=((f"{ref} " if ref else "") + (note or "")).strip() or None)))
         except ValueError as e:
             errors.append(RowResult(n, "error", str(e)))
     if errors:
@@ -403,15 +436,33 @@ def import_movements(db: Session, data: bytes, file_name: str, location_id: str)
         _record_batch(db, res, "xlsx", file_name, digest, len(rows), location_id)
         return res
     batch = _record_batch(db, res, "xlsx", file_name, digest, len(rows), location_id)
-    for n, d in parsed:
-        _, outcome = inv.add_movement(db, location_id=location_id, source="xlsx", import_batch_id=batch.id, **d)
-        res.rows.append(RowResult(n, outcome, d["external_ref"]))
+
+    def tally(n: int, outcome: str, msg: str):
+        res.rows.append(RowResult(n, outcome, msg))
         if outcome == "inserted":
             res.inserted += 1
         elif outcome == "duplicate":
             res.duplicate += 1
         else:
             res.updated += 1
+    try:
+        for (when, ref, store), g in groups.items():
+            d, outcome = dlv.record_sheet(db, location_id=location_id, source="sheet", occurred_at=when, ref=ref,
+                                          store=store, note=" · ".join(g["notes"])[:1000] or None,
+                                          lines=list(g["lines"].values()))
+            for n in g["rows"]:
+                tally(n, outcome, f"delivery {ref}")
+        for n, d in others:
+            _, outcome = inv.add_movement(db, location_id=location_id, source="xlsx", import_batch_id=batch.id, **d)
+            tally(n, outcome, d["external_ref"])
+    except (dlv.DeliveryError, inv.InventoryError) as e:
+        db.rollback()
+        res = ImportResult("movements")
+        res.status, res.errors = "rejected", 1
+        res.rows.append(RowResult(0, "error", str(e)))
+        _record_batch(db, res, "xlsx", file_name, digest, len(rows), location_id)
+        db.commit()
+        return res
     batch.rows_inserted, batch.rows_duplicate = res.inserted, res.duplicate
     db.commit()
     return res

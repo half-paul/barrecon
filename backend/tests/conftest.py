@@ -6,6 +6,7 @@ os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["ADMIN_PASSWORD"] = "test-pass"
 os.environ["SESSION_SECRET"] = "test-secret"
 os.environ["SCHEDULER_ENABLED"] = "false"
+os.environ["ADMIN_MFA_REQUIRED"] = "false"  # test_login_security.py turns it on
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
@@ -28,7 +29,9 @@ def db():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     s = Session()
-    seed(s)
+    loc = seed(s)
+    # tests write rows straight into the session: they belong to the first business, like the admin's requests
+    s.info["tenant_id"], s.info["business_id"] = loc.tenant_id, loc.id
     # route the app at the same engine
     dbmod.engine = engine
     dbmod.SessionLocal = Session
@@ -48,6 +51,14 @@ def db():
 def client(db):
     with TestClient(app) as c:
         c.post("/api/auth/login", json={"password": "test-pass"})
+        yield c
+
+
+@pytest.fixture()
+def platform(db):
+    """Logged in to the platform console (the login seed() makes from ADMIN_PASSWORD)."""
+    with TestClient(app) as c:
+        assert c.post("/api/auth/login", json={"username": "platform", "password": "test-pass"}).status_code == 200
         yield c
 
 

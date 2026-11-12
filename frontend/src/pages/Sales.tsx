@@ -55,7 +55,7 @@ export default function Sales() {
     setBusy(true);
     try {
       const r = await api.upload<SalesApplied>("/api/imports/swype-item-sales", salesFile);
-      setMsg({ kind: "ok", text: `Swype sales ${day(r.period_from)} – ${day(r.period_to)}: ${r.items} items (${r.inserted} new, ${r.updated} changed, ${r.unchanged} unchanged${r.removed ? `, ${r.removed} no longer listed` : ""}). Swype menu: ${menuText(r.menu)}.` });
+      setMsg({ kind: "ok", text: `Swype sales ${day(r.period_from)} to ${day(r.period_to)}: ${r.items} items (${r.inserted} new, ${r.updated} changed, ${r.unchanged} unchanged${r.removed ? `, ${r.removed} no longer listed` : ""}). Swype menu: ${menuText(r.menu)}.` });
       setSalesPreview(null); setSalesFile(null);
     } catch (e) { setMsg({ kind: "error", text: (e as Error).message }); } finally { setBusy(false); reloadAll(); }
   };
@@ -89,16 +89,16 @@ export default function Sales() {
   const cantFetch = busy || swype.data?.configured === false;
 
   const remove = async (from: string, to: string, label: string) => {
-    if (!confirm(`Remove the Swype sales imported for ${label}? Variance for those dates will have no sales until they are imported again.`)) return;
+    if (!confirm(`Remove the Swype sales imported for ${label}? Stock vs sales for those dates will have no sales until they are imported again.`)) return;
     setBusy(true);
     try {
       const r = await api.del<{ deleted: number; periods: number; kept_partial: { period_from: string; period_to: string }[] }>(
         `/api/imports/swype-item-sales/periods?date_from=${from}&date_to=${to}`);
-      const kept = r.kept_partial.length ? ` Kept ${r.kept_partial.map((x) => `${day(x.period_from)} – ${day(x.period_to)}`).join(", ")}: only partly inside the dates, widen them to remove.` : "";
+      const kept = r.kept_partial.length ? ` Kept ${r.kept_partial.map((x) => `${day(x.period_from)} to ${day(x.period_to)}`).join(", ")}: only partly inside the dates, widen them to remove.` : "";
       setMsg({ kind: "ok", text: `Removed ${r.periods} imported period${r.periods === 1 ? "" : "s"} (${r.deleted} item lines) for ${label}.${kept}` });
     } catch (e) { setMsg({ kind: "error", text: (e as Error).message }); } finally { setBusy(false); reloadAll(); }
   };
-  const label = (p: SalesPeriod) => p.period_from === p.period_to ? day(p.period_from) : `${day(p.period_from)} – ${day(p.period_to)}`;
+  const label = (p: SalesPeriod) => p.period_from === p.period_to ? day(p.period_from) : `${day(p.period_from)} to ${day(p.period_to)}`;
 
   // imported periods grouped into count weeks (each ends on the count day), newest first
   const cw = settings.data?.count_weekday ?? 6;
@@ -114,7 +114,7 @@ export default function Sales() {
   return (
     <Page area="sales" title="Sales" sub="Swype item sales, imported one day at a time">
       {msg && <Flash kind={msg.kind} onClose={() => setMsg(null)}>{msg.text}</Flash>}
-      {swype.data?.configured === false && <Notice kind="error">Swype login not set up. Add SWYPE_EMAIL and SWYPE_PASSWORD to .env and restart the portal.</Notice>}
+      {swype.data?.configured === false && <Notice kind="error">Swype login not set up for this business. An admin can add it under Setup, Businesses.</Notice>}
 
       <section className="card mb-6 p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
@@ -132,14 +132,14 @@ export default function Sales() {
         {swype.data?.next_from && !upToDate && (
           <div className="flex flex-wrap items-center gap-3 mb-3">
             <Button kind="quiet" edit onClick={() => importDays(daysBetween(swype.data!.next_from!, swype.data!.through))} disabled={cantFetch}>Import new sales</Button>
-            <span className="text-sm text-muted">{day(swype.data.next_from)} – {day(swype.data.through)}, after the latest imported day (today is left for tomorrow).</span>
+            <span className="text-sm text-muted">{day(swype.data.next_from)} to {day(swype.data.through)}, after the latest imported day (today is left for tomorrow).</span>
           </div>
         )}
         <div className="flex flex-wrap items-end gap-3">
           <Field label="From"><input type="date" className={inputCls} value={range.from} max={range.to} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} /></Field>
           <Field label="To"><input type="date" className={inputCls} value={range.to} min={range.from} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} /></Field>
           <Button kind="quiet" edit onClick={() => importDays(daysBetween(range.from, range.to))} disabled={cantFetch || !range.from || !range.to}>Import these dates</Button>
-          <Button kind="danger" onClick={() => remove(range.from, range.to, `${day(range.from)} – ${day(range.to)}`)} disabled={busy || !range.from || !range.to}>Remove these dates</Button>
+          <Button kind="danger" onClick={() => remove(range.from, range.to, `${day(range.from)} to ${day(range.to)}`)} disabled={busy || !range.from || !range.to}>Remove these dates</Button>
         </div>
         {progress && (
           <div className="mt-4" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
@@ -147,7 +147,7 @@ export default function Sales() {
               <span>Importing {day(progress.day)}…</span><span className="num">{progress.done} / {progress.total} days</span>
             </div>
             <div className="h-2 rounded-full bg-raised overflow-hidden">
-              <div className="h-full bg-accent transition-[width] duration-300" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+              <div className="h-full bg-accent" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
             </div>
           </div>
         )}
@@ -160,7 +160,7 @@ export default function Sales() {
         {salesPreview && (
           <div className="mt-4 text-sm">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
-              <div><div className="text-muted">Period</div><div>{day(salesPreview.period_from)} – {day(salesPreview.period_to)}</div></div>
+              <div><div className="text-muted">Period</div><div>{day(salesPreview.period_from)} to {day(salesPreview.period_to)}</div></div>
               <div><div className="text-muted">Items sold</div><div className="num">{salesPreview.items}</div></div>
               <div><div className="text-muted">Quantity</div><div className="num">{n(salesPreview.total_qty, 0)}</div></div>
               <div><div className="text-muted">Net sales</div><div className="num">{money(salesPreview.net_amount)}</div></div>
@@ -178,7 +178,7 @@ export default function Sales() {
       {periods.error && <Notice kind="error">{periods.error}</Notice>}
       {periods.data && periods.data.length === 0 && <Empty>No Swype sales imported yet. Use Import from Swype above.</Empty>}
       {weekList.length > 0 && (
-        <div className="card table-box px-2"><table className="grid">
+        <div className="table-box"><table className="grid">
           <thead><tr><th>Count week</th><th className="r">Days</th><th className="r">Item lines</th><th className="r">Qty</th><th className="r">Net sales</th><th></th></tr></thead>
           <tbody>{weekList.map(([end, ps]) => {
             const from = ps[0].period_from, to = ps[ps.length - 1].period_to;
@@ -187,12 +187,12 @@ export default function Sales() {
             return [
               <tr key={end}>
                 <td><button type="button" className="underline-offset-2 hover:underline" aria-expanded={shown} onClick={() => toggle(end)}>
-                  <span aria-hidden className="inline-block w-4 text-muted">{shown ? "▾" : "▸"}</span>{day(from)} – {day(to)}</button></td>
+                  <span aria-hidden className="inline-block w-4 text-muted">{shown ? "▾" : "▸"}</span>{day(from)} to {day(to)}</button></td>
                 <td className="r num">{days}</td>
                 <td className="r num">{ps.reduce((t, p) => t + p.items, 0)}</td>
                 <td className="r num">{n(ps.reduce((t, p) => t + p.total_qty, 0), 0)}</td>
                 <td className="r num">{money(ps.reduce((t, p) => t + p.net_amount, 0))}</td>
-                <td className="r"><Button kind="quiet" edit onClick={() => remove(from, to, `${day(from)} – ${day(to)}`)} disabled={busy}>Remove week</Button></td>
+                <td className="r"><Button kind="quiet" edit onClick={() => remove(from, to, `${day(from)} to ${day(to)}`)} disabled={busy}>Remove week</Button></td>
               </tr>,
               ...(shown ? ps.slice().reverse().flatMap((p) => {
                 const k = `items:${p.period_from}:${p.period_to}`;

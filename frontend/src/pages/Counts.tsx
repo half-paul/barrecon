@@ -29,7 +29,7 @@ export default function Counts() {
   const remove = async (s: CountSession) => {
     const posted = s.status !== "draft";
     if (!confirm(posted
-      ? `Delete the posted count from ${dt(s.counted_at)} (${s.line_count} item${s.line_count === 1 ? "" : "s"})? Variance and on-hand will stop using it. It stays in the records, marked deleted, under "show superseded and deleted counts".`
+      ? `Delete the posted count from ${dt(s.counted_at)} (${s.line_count} item${s.line_count === 1 ? "" : "s"})? Stock vs sales and on-hand will stop using it. It stays in the records, marked deleted, under "show superseded and deleted counts".`
       : `Delete the draft count from ${dt(s.counted_at)}?`)) return;
     try {
       await api.del(`/api/counts/${s.id}`);
@@ -54,7 +54,7 @@ export default function Counts() {
       {sessions.error && <Notice kind="error">{sessions.error}</Notice>}
       {sessions.data && sessions.data.length === 0 && <Empty>No counts yet. Start one, or upload a filled count sheet.</Empty>}
       {sessions.data && sessions.data.length > 0 && (
-        <div className="card table-box px-2"><table className="grid">
+        <div className="table-box"><table className="grid">
           <thead><tr><th>Counted at</th><th>Status</th><th className="max-sm:hidden">Source</th><th className="r">Items</th><th className="max-sm:hidden">Note</th><th></th></tr></thead>
           <tbody>{sessions.data.map((s) => (
             <tr key={s.id} className={s.status === "superseded" || s.status === "deleted" ? "text-muted" : ""}>

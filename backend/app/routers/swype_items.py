@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..auth import perm
 from ..db import get_db
 from ..models import SwypeMenuItem
-from ..seed import default_location
+from ..tenancy import business_id
 from ..services import recipes as rec
 from ..services import swype_items as si
 
@@ -23,7 +23,7 @@ class SwypeItemPatch(BaseModel):
 
 
 def _sold(db: Session, date_from: date | None = None, date_to: date | None = None) -> dict[str, dict]:
-    return {r["code"]: r for r in rec.sold_codes(db, default_location(db).id, date_from, date_to)}
+    return {r["code"]: r for r in rec.sold_codes(db, business_id(db), date_from, date_to)}
 
 
 @router.get("")

@@ -12,7 +12,7 @@ export type SearchResult = {
   recipes: { code: string; name: string; category: string | null; ignored: boolean; ingredients: string[]; snippet: string | null }[];
   groups: { name: string; items: number; active: number }[];
   counts: { id: string; counted_at: string; status: string; source: string; note: string | null }[];
-  movements: { id: string; occurred_at: string; kind: string; external_ref: string; item: string; status: string; note: string | null }[];
+  movements: { id: string; occurred_at: string; kind: string; external_ref: string; item: string; status: string; note: string | null; delivery_id: string | null }[];
   deliveries: { id: string; store: string | null; receipt_no: string | null; status: string; note: string | null; occurred_at: string | null }[];
   imports: { id: string; file_name: string | null; dataset: string; status: string; imported_at: string }[];
   issues: { id: string; code: string; detail: string | null }[];
@@ -42,7 +42,7 @@ export function searchHits(r: SearchResult): Hit[] {
     })),
     ...r.groups.map((g) => ({ id: g.name, group: "Item groups", label: g.name, hint: `${g.items} items · ${g.active} active`, to: `/items?cat=${encodeURIComponent(g.name)}&status=all` })),
     ...r.counts.map((c) => ({ id: c.id, group: "Counts", label: `Count ${d(c.counted_at)}`, hint: [c.status, c.note].filter(Boolean).join(" · "), to: `/counts/${c.id}` })),
-    ...r.movements.map((m) => ({ id: m.id, group: "Deliveries", label: `${m.item}: ${m.external_ref}`, hint: [m.kind.replace(/_/g, " "), d(m.occurred_at), m.status !== "active" ? m.status : null, m.note].filter(Boolean).join(" · "), to: `/movements?q=${encodeURIComponent(m.external_ref)}` })),
+    ...r.movements.map((m) => ({ id: m.id, group: "Deliveries", label: `${m.item}: ${m.external_ref}`, hint: [m.kind.replace(/_/g, " "), d(m.occurred_at), m.status !== "active" ? m.status : null, m.note].filter(Boolean).join(" · "), to: m.delivery_id ? `/deliveries/${m.delivery_id}` : "/deliveries" })),
     ...r.deliveries.map((x) => ({ id: x.id, group: "Receipts", label: [x.store ?? "Receipt", x.receipt_no].filter(Boolean).join(" "), hint: [x.occurred_at ? d(x.occurred_at) : null, x.status, x.note].filter(Boolean).join(" · "), to: `/deliveries/${x.id}` })),
     ...r.imports.map((b) => ({ id: b.id, group: "Imports", label: b.file_name ?? b.dataset, hint: [b.dataset.replace(/_/g, " "), d(b.imported_at), b.status === "ok" ? null : b.status].filter(Boolean).join(" · "), to: "/imports" })),
     ...r.issues.map((i) => ({ id: i.id, group: "To review", label: i.detail ?? i.code.replace(/_/g, " "), hint: i.code.replace(/_/g, " "), to: "/imports" })),
@@ -107,7 +107,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
           <SearchIcon />
           <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder="Search items, Swype, recipes, notes, counts, deliveries…"
             aria-label="Search" className="flex-1 bg-transparent py-3.5 outline-none focus-visible:outline-none text-[15px]" />
-          <kbd className="mono text-[11px] text-muted border border-line rounded px-1.5">Esc</kbd>
+          <kbd className="mono text-xs text-muted border border-line rounded px-1.5">Esc</kbd>
         </div>
         <ul className="max-h-[50vh] overflow-y-auto py-2" role="listbox">
           {results.length === 0 && <li className="px-4 py-6 text-center text-muted">{searching ? "Searching…" : "Nothing matches."}</li>}
@@ -115,7 +115,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
             const head = c.group !== lastGroup ? (lastGroup = c.group) : null;
             return (
               <li key={`${c.group}-${c.id}`}>
-                {head && <div className="label-caps px-4 pt-2 pb-1 text-[11px]">{head}</div>}
+                {head && <div className="label px-4 pt-2 pb-1">{head}</div>}
                 <button role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onClick={() => run(c)}
                   className={`w-full text-left px-4 py-2 flex items-center justify-between gap-3 ${i === sel ? "bg-raised" : ""}`}>
                   <span>{c.label}</span>
@@ -128,7 +128,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
         {anyHits && (
           <button onClick={seeAll} className="w-full flex items-center justify-between gap-3 px-4 py-2.5 border-t border-line text-sm hover:bg-raised">
             <span className="underline">See all results</span>
-            <kbd className="mono text-[11px] text-muted border border-line rounded px-1.5 hidden sm:inline">⇧ Enter</kbd>
+            <kbd className="mono text-xs text-muted border border-line rounded px-1.5 hidden sm:inline">⇧ Enter</kbd>
           </button>
         )}
       </div>

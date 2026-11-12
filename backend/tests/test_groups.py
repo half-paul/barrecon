@@ -58,13 +58,20 @@ def test_delivery_batch(client):
             "lines": [{"item_id": a["id"], "packs": 12, "pack_cost": 31}, {"item_id": b["id"], "packs": 6}]}
     r = client.post("/api/movements/batch", json=body)
     assert r.status_code == 200, r.text
-    assert r.json() == {"inserted": 2, "duplicate": 0, "superseded": 0}
+    assert r.json()["outcome"] == "inserted"
     moves = client.get("/api/movements").json()
     assert {(m["name"], D(m["qty"])) for m in moves} == {("Vodka", D(9000)), ("Gin", D(4500))}
     assert D(client.get(f"/api/items/{a['id']}").json()["pack_cost"]) == 31
+    # it is a delivery like a receipt: listed under Deliveries, posted
+    dl = client.get("/api/deliveries").json()
+    assert [(d["receipt_no"], d["status"], d["source"], d["item_count"]) for d in dl] == [("INV-9", "posted", "sheet", 2)]
 
+    assert client.post("/api/movements/batch", json=body).json()["outcome"] == "duplicate"
     body["lines"][1]["packs"] = 7
-    assert client.post("/api/movements/batch", json=body).json() == {"inserted": 0, "duplicate": 1, "superseded": 1}
+    assert client.post("/api/movements/batch", json=body).json()["outcome"] == "superseded"
+    moves = client.get("/api/movements").json()
+    assert {(m["name"], D(m["qty"])) for m in moves} == {("Vodka", D(9000)), ("Gin", D(5250))}
+    assert len(client.get("/api/deliveries").json()) == 1
 
     # all or nothing: a bad line saves none of them
     bad = {**body, "external_ref": "INV-10", "lines": [{"item_id": a["id"], "packs": 1}, {"item_id": "nope", "packs": 1}]}

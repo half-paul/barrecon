@@ -2,11 +2,11 @@ import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Group, n } from "../lib/api";
 import { useReadOnly } from "../lib/auth";
-import { Button, Empty, Field, Flash, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
+import { Button, Empty, Field, Flash, inputCls, Loading, Nil, Notice, Page, useAsync } from "../lib/ui";
 
 type Units = { code: string; dimension: string }[];
-type Form = { name: string; stock_unit: string; pack_name: string; pack_size: string; case_size: string };
-const blank: Form = { name: "", stock_unit: "ml", pack_name: "bottle", pack_size: "750", case_size: "12" };
+type Form = { name: string; stock_unit: string; pack_name: string; pack_size: string; case_size: string; sheet_in_cases: boolean };
+const blank: Form = { name: "", stock_unit: "ml", pack_name: "bottle", pack_size: "750", case_size: "12", sheet_in_cases: false };
 const enc = encodeURIComponent;
 const trim = (v: string) => v.replace(/\.?0+$/, "");
 
@@ -28,12 +28,13 @@ export default function Groups() {
     } catch (e) { fail(e); }
   };
   const save = async (g: Group, f: Form) => {
-    const c: Record<string, string | null> = {};
+    const c: Record<string, string | boolean | null> = {};
     if (f.name.trim() !== g.name) c.name = f.name.trim();
     if (f.stock_unit !== g.stock_unit) c.stock_unit = f.stock_unit;
     if (f.pack_name.trim() !== (g.pack_name ?? "")) c.pack_name = f.pack_name.trim() || null;
     if (Number(f.pack_size) !== Number(g.pack_size)) c.pack_size = f.pack_size;
     if (Number(f.case_size) !== Number(g.case_size)) c.case_size = f.case_size;
+    if (f.sheet_in_cases !== g.sheet_in_cases) c.sheet_in_cases = f.sheet_in_cases;
     try {
       if (Object.keys(c).length) await api.patch(`/api/groups/${enc(g.name)}`, c);
       setEditing(null); setMsg(c.name ? { kind: "ok", text: `Renamed ${g.name} to ${c.name}; its ${g.item_count} items moved with it.` } : null); groups.reload();
@@ -73,24 +74,26 @@ export default function Groups() {
           <Field label="Pack name"><input className={inputCls} value={form.pack_name} onChange={(e) => setForm({ ...form, pack_name: e.target.value })} /></Field>
           <Field label="Pack size (in counted unit)" hint="750 for a 750 ml bottle; 1 for a can"><input className={`${inputCls} num`} inputMode="decimal" value={form.pack_size} onChange={(e) => setForm({ ...form, pack_size: e.target.value })} /></Field>
           <Field label="Packs per case / flat"><input className={`${inputCls} num`} inputMode="decimal" value={form.case_size} onChange={(e) => setForm({ ...form, case_size: e.target.value })} /></Field>
+          <Field label="Deliveries sheet" hint="packs column counts cases of this group"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sheet_in_cases} onChange={(e) => setForm({ ...form, sheet_in_cases: e.target.checked })} /> Sheet counts cases</label></Field>
           <div className="col-span-full"><Button onClick={add} disabled={!form.name.trim() || !(Number(form.pack_size) > 0)}>Save group</Button></div>
         </div>
       )}
       {groups.data && list.length === 0 && <Empty>No groups yet. Add one, or give items a group on Stock items.</Empty>}
       {list.length > 0 && (
-        <div className="card table-box px-2"><table className="grid">
-          <thead><tr><th>Group</th><th>Counted in</th><th>Pack</th><th className="r">Pack size</th><th className="r">Per case</th><th className="r">Items</th><th>Items that differ</th><th /></tr></thead>
+        <div className="table-box"><table className="grid">
+          <thead><tr><th>Group</th><th>Counted in</th><th>Pack</th><th className="r">Pack size</th><th className="r">Per case</th><th>Sheet counts</th><th className="r">Items</th><th>Items that differ</th><th /></tr></thead>
           <tbody>{list.map((g) => editing === g.name
             ? <EditRow key={g.name} g={g} unitOptions={unitOptions} onSave={(f) => save(g, f)} onCancel={() => setEditing(null)} />
             : (<Fragment key={g.name}>
               <tr>
                 <td className="font-medium">{g.name}</td>
                 <td>{g.stock_unit}</td>
-                <td>{g.pack_name || <span className="text-faint">—</span>}</td>
+                <td>{g.pack_name || <Nil />}</td>
                 <td className="r num">{n(g.pack_size, 0)} <span className="text-muted">{g.stock_unit}</span></td>
                 <td className="r num">{n(g.case_size, 0)}</td>
+                <td>{g.sheet_in_cases ? "cases" : <span className="text-faint">{g.pack_name || "packs"}</span>}</td>
                 <td className="r num"><Link className="underline" to={`/items?status=all&cat=${enc(g.name)}`}>{g.item_count}</Link>{g.active_count < g.item_count && <span className="text-faint text-xs"> · {g.active_count} active</span>}</td>
-                <td>{g.differing && !viewOnly ? <button className="text-sm text-accent hover:underline" onClick={() => apply(g)}>{g.differing} — set to group pack</button> : <span className="text-faint">none</span>}</td>
+                <td>{g.differing && !viewOnly ? <button className="text-sm text-accent hover:underline" onClick={() => apply(g)}>{g.differing}: set to group pack</button> : <span className="text-faint">none</span>}</td>
                 <td className="r whitespace-nowrap" hidden={viewOnly}>
                   <button className="text-sm text-muted hover:text-ink underline" aria-label={`Edit ${g.name}`} onClick={() => { setEditing(g.name); setRemoving(null); }}>Edit</button>
                   <button className="text-sm text-danger hover:underline ml-3" aria-label={`Remove ${g.name}`} onClick={() => setRemoving(removing === g.name ? null : g.name)}>Remove</button>
@@ -101,8 +104,9 @@ export default function Groups() {
           </tbody>
         </table></div>
       )}
-      <p className="text-sm text-muted mt-4 max-w-3xl">Changing a group's pack changes the defaults for new items. Existing items keep their own pack until you use
-        “set to group pack”. An item that already has counts or deliveries keeps its counted unit, because those are stored in it.</p>
+      <p className="text-sm text-muted mt-4 max-w-3xl">Changing a group’s pack changes the defaults for new items. Existing items keep their own pack until you use
+        “set to group pack”. An item that already has counts or deliveries keeps its counted unit, because those are stored in it.
+        With “sheet counts cases”, the packs number on an uploaded deliveries sheet is cases: 2 of a 12-bottle case adds 24 bottles. pack_cost stays per bottle.</p>
     </Page>
   );
 }
@@ -110,7 +114,7 @@ export default function Groups() {
 const pack = (g: Group) => `${g.pack_name || "pack"} of ${n(g.pack_size, 0)} ${g.stock_unit}, ${n(g.case_size, 0)} per case`;
 
 function EditRow({ g, unitOptions, onSave, onCancel }: { g: Group; unitOptions: React.ReactNode; onSave: (f: Form) => void; onCancel: () => void }) {
-  const [f, setF] = useState<Form>({ name: g.name, stock_unit: g.stock_unit, pack_name: g.pack_name ?? "", pack_size: trim(g.pack_size), case_size: trim(g.case_size) });
+  const [f, setF] = useState<Form>({ name: g.name, stock_unit: g.stock_unit, pack_name: g.pack_name ?? "", pack_size: trim(g.pack_size), case_size: trim(g.case_size), sheet_in_cases: g.sheet_in_cases });
   const ok = f.name.trim() && Number(f.pack_size) > 0 && Number(f.case_size) > 0;
   return (
     <tr className="bg-raised/40" onKeyDown={(e) => { if (e.key === "Enter" && ok) onSave(f); if (e.key === "Escape") onCancel(); }}>
@@ -119,6 +123,7 @@ function EditRow({ g, unitOptions, onSave, onCancel }: { g: Group; unitOptions: 
       <td><input className="cell-input text-left w-36" aria-label="Pack name" value={f.pack_name} onChange={(e) => setF({ ...f, pack_name: e.target.value })} /></td>
       <td className="r num"><input className="cell-input" inputMode="decimal" aria-label="Pack size" value={f.pack_size} onChange={(e) => setF({ ...f, pack_size: e.target.value })} /> <span className="text-muted">{f.stock_unit}</span></td>
       <td className="r num"><input className="cell-input" inputMode="decimal" aria-label="Per case" value={f.case_size} onChange={(e) => setF({ ...f, case_size: e.target.value })} /></td>
+      <td><label className="flex items-center gap-1 text-sm"><input type="checkbox" aria-label="Sheet counts cases" checked={f.sheet_in_cases} onChange={(e) => setF({ ...f, sheet_in_cases: e.target.checked })} /> cases</label></td>
       <td className="r num">{g.item_count}</td>
       <td className="text-xs text-muted">{f.name.trim() !== g.name && g.item_count ? `${g.item_count} items move to the new name` : ""}</td>
       <td className="r whitespace-nowrap">
@@ -132,7 +137,7 @@ function EditRow({ g, unitOptions, onSave, onCancel }: { g: Group; unitOptions: 
 function RemoveRow({ g, others, onRemove, onCancel }: { g: Group; others: Group[]; onRemove: (moveTo: string) => void; onCancel: () => void }) {
   const [to, setTo] = useState("");
   return (
-    <tr className="bg-danger-soft/40"><td colSpan={8}>
+    <tr className="bg-danger-soft/40"><td colSpan={9}>
       <div className="flex flex-wrap items-center gap-3 text-sm">
         {g.item_count ? <>
           <span>Remove {g.name}. Move its {g.item_count} item{g.item_count === 1 ? "" : "s"} to</span>

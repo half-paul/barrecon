@@ -14,7 +14,7 @@ from ..config import settings
 from ..db import get_db
 from ..models import CountLine, CountSession, InventoryItem, User
 from ..schemas import CountLineIn, CountLineOut, CountSessionDetail, CountSessionIn, CountSessionOut
-from ..seed import default_location
+from ..tenancy import business_id
 from ..services import inventory as inv
 from ..services import variance, xlsx_io
 
@@ -74,9 +74,9 @@ def template(db: Session = Depends(get_db), count_date: date | None = None):
 
 @router.post("/import")
 async def import_counts(file: UploadFile, db: Session = Depends(get_db)):
-    loc = default_location(db)
+    loc = business_id(db)
     try:
-        res = xlsx_io.import_counts(db, await file.read(), file.filename or "counts.xlsx", loc.id)
+        res = xlsx_io.import_counts(db, await file.read(), file.filename or "counts.xlsx", loc)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     return res.summary()
@@ -84,14 +84,14 @@ async def import_counts(file: UploadFile, db: Session = Depends(get_db)):
 
 @router.post("", response_model=CountSessionDetail, status_code=201)
 def create_session(body: CountSessionIn, db: Session = Depends(get_db)):
-    loc = default_location(db)
-    s = CountSession(location_id=loc.id, counted_at=inv.to_utc(body.counted_at), note=body.note, status="draft", source="portal")
+    loc = business_id(db)
+    s = CountSession(location_id=loc, counted_at=inv.to_utc(body.counted_at), note=body.note, status="draft", source="portal")
     db.add(s)
     db.flush()
     if body.prefill_active_items:
         # start an item at what should be left (last posted count minus recipe usage of Swype sales since)
         # only when the formula gives something; the rest stay blank until counted
-        left = variance.expected_left(db, loc.id, s.counted_at)
+        left = variance.expected_left(db, loc, s.counted_at)
         for it in db.scalars(select(InventoryItem).where(InventoryItem.is_active)):
             full, partial = _packs(it, left.get(it.id, Decimal(0)))
             if full + partial > 0:
