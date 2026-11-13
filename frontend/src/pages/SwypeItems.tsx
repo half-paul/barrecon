@@ -26,7 +26,7 @@ export default function SwypeItems() {
   };
   const q = params.get("q") ?? "";
   const status = (params.get("status") as Status | null) ?? "active";
-  const range = (params.get("range") as Range | null) ?? "all";
+  const range = (params.get("range") as Range | null) ?? "week";
   const days = RANGES.find((r) => r[0] === range)?.[2] ?? 0;
   const [from, to] = range === "custom" ? [params.get("from") ?? "", params.get("to") ?? ""]
     : days ? [daysAgo(days), daysAgo(0)] : ["", ""];
@@ -36,13 +36,14 @@ export default function SwypeItems() {
   const hit = (periods.data ?? []).filter((p) => (!from || p.period_to >= from) && (!to || p.period_from <= to));
   const pickRange = (r: Range) => setMany(r === "custom"
     ? { range: r, from: from || daysAgo(7), to: to || daysAgo(0) }
-    : { range: r === "all" ? "" : r, from: "", to: "" });
+    : { range: r === "week" ? "" : r, from: "", to: "" });
   const all = items.data ?? [];
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const searched = all.filter((i) => words.every((w) => [i.code, i.name, i.swype_name, i.category ?? ""].some((f) => f.toLowerCase().includes(w))));
   const statusCount = { active: searched.filter((i) => i.is_active).length, off: searched.filter((i) => !i.is_active).length, all: searched.length };
   const shown = searched.filter((i) => status === "all" || (status === "active") === i.is_active);
   const groups = groupBy(shown, catOf).sort((a, b) => byName(a[0], b[0]));
+  const priceAlerts = all.filter((i) => i.is_active && i.price_alert).length;
   const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -69,6 +70,12 @@ export default function SwypeItems() {
           <span className="text-sm text-muted">A switched-off item comes back on when a Swype import shows it sold.</span>
         </div>
       )}
+      {priceAlerts > 0 && (
+        <p className="text-sm text-accent mb-4" role="status">
+          {priceAlerts} item{priceAlerts === 1 ? "" : "s"} sell{priceAlerts === 1 ? "s" : ""} at a price off Swype’s catalogue Default Price (marked ▲/▼ below).
+          Import a fresh Export Item file, or fix the price in Swype.
+        </p>
+      )}
       {all.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="inline-flex flex-wrap rounded-control border border-line overflow-hidden text-sm" role="group" aria-label="Sold in">
@@ -90,16 +97,22 @@ export default function SwypeItems() {
       {all.length > 0 && shown.length === 0 && <Empty>No Swype items match.</Empty>}
       {shown.length > 0 && (
         <div className="table-box"><table className="grid">
-          <thead><tr><th>Swype #</th><th>Name</th><th className="r">Sold</th><th className="r">Last sold</th><th>Active</th><th /></tr></thead>
+          <thead><tr><th>Swype #</th><th>Name</th><th className="r">Price</th><th className="r">Sold</th><th className="r">Last sold</th><th>Active</th><th /></tr></thead>
           <tbody>
             {groups.map(([c, rows]) => (<Fragment key={c}>
-              <tr className="section"><td colSpan={6}>{c} <span className="text-faint font-normal">{rows.length}</span></td></tr>
+              <tr className="section"><td colSpan={7}>{c} <span className="text-faint font-normal">{rows.length}</span></td></tr>
               {rows.map((it) => editing === it.code
                 ? <EditRow key={it.code} it={it} onSave={(name) => patch(it, { name })} onCancel={() => setEditing(null)} />
                 : (
                   <tr key={it.code} className={it.is_active ? "" : "text-muted"}>
                     <td className="num text-muted whitespace-nowrap">{it.code}</td>
                     <td>{it.name}{it.renamed && <div className="text-xs text-muted">Swype: {it.swype_name}</div>}</td>
+                    <td className="r num whitespace-nowrap">
+                      {it.price != null
+                        ? <span title={it.price_period_to ? `Amt ÷ Qty, sales to ${day(it.price_period_to)}` : undefined}>${n(it.price, 2)}</span>
+                        : it.catalogue_price ? <span className="text-faint" title="Swype catalogue price; no paid sales imported yet">${n(it.catalogue_price, 2)}</span> : <Nil />}
+                      {it.price_alert && <span className="block text-xs text-accent" title="Sales price vs Swype's Default Price">{it.price_change_pct! > 0 ? "▲" : "▼"} {n(Math.abs(it.price_change_pct!), 1)} % vs ${n(it.catalogue_price, 2)}</span>}
+                    </td>
                     <td className="r num">{it.sold ? n(it.sold, 0) : <Nil />}</td>
                     <td className="r num whitespace-nowrap">{it.last_sold ? day(it.last_sold) : <span className="text-faint">never</span>}</td>
                     <td><input type="checkbox" disabled={viewOnly} aria-label={`${it.name} active`} checked={it.is_active} onChange={(e) => patch(it, { is_active: e.target.checked })} /></td>
@@ -118,7 +131,7 @@ function EditRow({ it, onSave, onCancel }: { it: SwypeItem; onSave: (name: strin
   return (
     <tr className="bg-raised/40" onKeyDown={(e) => { if (e.key === "Enter") onSave(name); if (e.key === "Escape") onCancel(); }}>
       <td className="num text-muted whitespace-nowrap">{it.code}</td>
-      <td colSpan={4}>
+      <td colSpan={5}>
         <input className="cell-input text-left w-full max-w-md" autoFocus value={name} aria-label="Name" onChange={(e) => setName(e.target.value)} />
         <div className="text-xs text-muted mt-1">Swype: {it.swype_name}. Leave blank to use Swype’s name.</div>
       </td>

@@ -26,7 +26,8 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 # columns added after their table was first created; create_all only makes missing tables
 ADDED_COLUMNS = {
     "swype_menu_items": {"custom_name": "VARCHAR(200)", "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
-                         "location_id": "VARCHAR(36) REFERENCES locations(id)"},
+                         "location_id": "VARCHAR(36) REFERENCES locations(id)",
+                         "price": "NUMERIC(10, 2)", "price_period_to": "DATE", "catalogue_price": "NUMERIC(10, 2)"},
     "recipes": {"steps": "TEXT", "location_id": "VARCHAR(36) REFERENCES locations(id)"},
     "stock_movements": {"delivery_id": "VARCHAR(36) REFERENCES deliveries(id)"},
     "delivery_lines": {"receipt_sku": "VARCHAR(64)"},

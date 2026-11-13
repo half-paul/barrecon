@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -12,6 +13,7 @@ from ..db import get_db
 from ..models import SwypeMenuItem
 from ..tenancy import business_id
 from ..services import recipes as rec
+from ..services import settings_svc
 from ..services import swype_items as si
 
 router = APIRouter(prefix="/api/swype-items", tags=["swype-items"], dependencies=[perm("swype_items")])
@@ -20,6 +22,10 @@ router = APIRouter(prefix="/api/swype-items", tags=["swype-items"], dependencies
 class SwypeItemPatch(BaseModel):
     name: str | None = Field(default=None, max_length=200)  # blank = back to Swype's name
     is_active: bool | None = None
+
+
+def _threshold(db: Session) -> Decimal:
+    return Decimal(settings_svc.get(db, "price_alert_pct"))
 
 
 def _sold(db: Session, date_from: date | None = None, date_to: date | None = None) -> dict[str, dict]:
@@ -33,8 +39,15 @@ def list_swype_items(date_from: date | None = Query(default=None, alias="from"),
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "'from' is after 'to'")
     sold = _sold(db, date_from, date_to)
+    threshold = _threshold(db)
     items = db.scalars(select(SwypeMenuItem).order_by(SwypeMenuItem.category, SwypeMenuItem.name)).all()
-    return [si.item_out(m, sold.get(m.code)) for m in items]
+    return [si.item_out(m, sold.get(m.code), threshold) for m in items]
+
+
+@router.get("/price-alerts")
+def swype_price_alerts(db: Session = Depends(get_db)):
+    """Items whose sales price (Amt / Qty, latest period) is off Swype's catalogue Default Price."""
+    return si.price_alerts(db)
 
 
 @router.patch("/{code}")
@@ -44,4 +57,4 @@ def patch_swype_item(code: str, body: SwypeItemPatch, db: Session = Depends(get_
     except si.MenuItemError as e:
         raise HTTPException(404, str(e)) from None
     db.commit()
-    return si.item_out(m, _sold(db).get(code))
+    return si.item_out(m, _sold(db).get(code), _threshold(db))

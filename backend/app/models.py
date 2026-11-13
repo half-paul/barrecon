@@ -401,6 +401,11 @@ class SwypeMenuItem(Base):
     category: Mapped[str | None] = mapped_column(String(120))
     source: Mapped[str] = mapped_column(String(16))  # sales | csv (where it was first seen)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())  # a sale switches it back on
+    # Selling price from the latest Item Sales period with paid units: Amt / Qty (combo/promo/free units excluded).
+    price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    price_period_to: Mapped[date | None] = mapped_column(Date)  # last day of the period the price came from
+    # "Default Price" from Swype's Export Item file, kept to cross-check the sales price.
+    catalogue_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

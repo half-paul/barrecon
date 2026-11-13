@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..auth import Auth, perm
 from ..db import get_db
 from ..tenancy import business_id
-from ..services import variance
+from ..services import performance, variance
 
 router = APIRouter(prefix="/api/variance", tags=["variance"], dependencies=[Auth])
 VARIANCE = perm("variance")
@@ -25,6 +25,11 @@ def counts(limit: int = Query(10, ge=1, le=100), offset: int = Query(0, ge=0), d
 @router.get("/current")  # the Overview and Sales "this week" checklist, shown to everyone
 def current(db: Session = Depends(get_db)):
     return variance.current(db, business_id(db))
+
+
+@router.get("/performance", dependencies=[VARIANCE])  # the Overview's Bar Performance stats
+def bar_performance(db: Session = Depends(get_db)):
+    return performance.performance(db, business_id(db))
 
 
 @router.get("", dependencies=[VARIANCE])

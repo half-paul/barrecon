@@ -20,6 +20,7 @@ import Sales from "./pages/Sales";
 import SettingsPage from "./pages/Settings";
 import Recipes from "./pages/Recipes";
 import Variance from "./pages/Variance";
+import { PourCostReport, ReorderReport, SlowMovingReport } from "./pages/Reports";
 import Groups from "./pages/Groups";
 import DeliveryEntry from "./pages/DeliveryEntry";
 import Deliveries from "./pages/Deliveries";
@@ -33,19 +34,29 @@ import Platform from "./pages/Platform";
 
 // The weekly loop in the order it is done, then the things set up once and changed now and then.
 const weekly = [["/", "Overview"], ["/counts", "Counts"], ["/deliveries", "Deliveries"], ["/sales", "Sales"], ["/variance", "Stock vs sales"]] as const;
+const reports = [["/reports/pour-cost", "Pour cost"], ["/reports/reorder", "Purchasing"], ["/reports/slow-moving", "Slow-moving stock"]] as const;
 const setup = [["/items", "Stock items"], ["/items/groups", "Item groups"], ["/swype-items", "Swype items"], ["/recipes", "Recipes"], ["/imports", "Imports"], ["/settings", "Settings"],
   ["/businesses", "Businesses"], ["/users", "Users"], ["/audit", "Audit log"]] as const;
-const nav = [...weekly, ...setup];
-const ICONS: Record<string, IconName> = { "/": "home", "/counts": "counts", "/deliveries": "truck", "/sales": "sales", "/variance": "scale",
+const nav = [...weekly, ...reports, ...setup];
+const ICONS: Record<string, IconName> = { "/": "home", "/counts": "counts", "/deliveries": "truck", "/sales": "sales", "/variance": "scale", "/reports/pour-cost": "glass", "/reports/reorder": "truck", "/reports/slow-moving": "history",
   "/items": "box", "/items/groups": "layers", "/swype-items": "tag", "/recipes": "recipe", "/imports": "upload", "/settings": "settings",
   "/businesses": "building", "/users": "users", "/audit": "history" };
 /** Only the pages this login may open. */
 const useAllowed = <T extends readonly [string, string]>(links: readonly T[]) => { const me = useMe(); return links.filter(([to]) => can(me, PAGE_AREA[to] ?? null)); };
 
 /** Desktop: every page in a navy rail on the left, the weekly loop first, then setup. */
+// Reports group: collapsed by default, auto-expanded while on a report page.
+function useReportsOpen() {
+  const onReport = useLocation().pathname.startsWith("/reports");
+  const [open, setOpen] = useState(onReport);
+  useEffect(() => { if (onReport) setOpen(true); }, [onReport]);
+  return [open, setOpen] as const;
+}
+
 function SideNav({ onLogout, onSearch, onCount }: { onLogout: () => void; onSearch: () => void; onCount: (() => void) | null }) {
   const me = useMe();
-  const week = useAllowed(weekly), items = useAllowed(setup);
+  const week = useAllowed(weekly), reps = useAllowed(reports), items = useAllowed(setup);
+  const [repsOpen, setRepsOpen] = useReportsOpen();
   const link = (to: string, label: string) => (
     <NavLink key={to} to={to} end={to === "/" || to === "/items"} className="navlink"><Icon name={ICONS[to] ?? "box"} />{label}</NavLink>);
   return (
@@ -57,6 +68,12 @@ function SideNav({ onLogout, onSearch, onCount }: { onLogout: () => void; onSear
       </button>
       <nav aria-label="Main" className="flex flex-col gap-0.5 px-3">
         {week.map(([to, label]) => link(to, label))}
+        {reps.length > 0 && <>
+          <div className="border-t border-line my-3" />
+          <button type="button" aria-expanded={repsOpen} onClick={() => setRepsOpen((v) => !v)}
+            className="navlink w-full text-left"><Icon name="layers" /><span className="flex-1">Reports</span><span aria-hidden className="text-xs">{repsOpen ? "▾" : "▸"}</span></button>
+          {repsOpen && <div className="flex flex-col gap-0.5 pl-4">{reps.map(([to, label]) => link(to, label))}</div>}
+        </>}
         {items.length > 0 && <>
           <div className="border-t border-line my-3" />
           <div className="px-3 pb-1 text-xs text-muted">Setup</div>
@@ -75,8 +92,9 @@ function SideNav({ onLogout, onSearch, onCount }: { onLogout: () => void; onSear
 /** Phones and narrow tablets: every page behind one button, so the header stays a single row. */
 function MobileMenu({ onLogout }: { onLogout: () => void }) {
   const me = useMe();
-  const week = useAllowed(weekly), items = useAllowed(setup);
+  const week = useAllowed(weekly), reps = useAllowed(reports), items = useAllowed(setup);
   const [open, setOpen] = useState(false);
+  const [repsOpen, setRepsOpen] = useReportsOpen();
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname, loc.search]);
   useEffect(() => {
@@ -102,6 +120,10 @@ function MobileMenu({ onLogout }: { onLogout: () => void }) {
           <nav id="mobile-menu" aria-label="Main" onClick={(e) => e.stopPropagation()}
             className="bg-surface border-b border-line shadow-lg max-h-[calc(100dvh-4rem)] overflow-y-auto px-4 pt-2 pb-4">
             {week.map(([to, label]) => <NavLink key={to} to={to} end className={link}>{label}</NavLink>)}
+            {reps.length > 0 && <button type="button" aria-expanded={repsOpen} onClick={() => setRepsOpen((v) => !v)}
+              className="flex w-full items-center px-3 py-3 rounded-control text-[15px] text-muted hover:text-ink hover:bg-raised">
+              <span className="flex-1 text-left">Reports</span><span aria-hidden>{repsOpen ? "▾" : "▸"}</span></button>}
+            {repsOpen && reps.map(([to, label]) => <NavLink key={to} to={to} end className={(s) => `${link(s)} pl-7`}>{label}</NavLink>)}
             {items.length > 0 && <div className="label px-3 pt-4 pb-1 text-xs">Setup</div>}
             {items.map(([to, label]) => <NavLink key={to} to={to} end className={link}>{label}</NavLink>)}
             {me && me.businesses.length > 1 && <>
@@ -238,6 +260,10 @@ export default function App() {
           <Route path="/movements/new" element={<Navigate to="/deliveries/sheet" replace />} />
           <Route path="/recipes" element={guard("/recipes", <Recipes />)} />
           <Route path="/variance" element={guard("/variance", <Variance />)} />
+          <Route path="/reports" element={<Navigate to="/reports/pour-cost" replace />} />
+          <Route path="/reports/pour-cost" element={guard("/reports/pour-cost", <PourCostReport />)} />
+          <Route path="/reports/reorder" element={guard("/reports/reorder", <ReorderReport />)} />
+          <Route path="/reports/slow-moving" element={guard("/reports/slow-moving", <SlowMovingReport />)} />
           <Route path="/sales" element={guard("/sales", <Sales />)} />
           <Route path="/imports" element={guard("/imports", <Imports />)} />
           <Route path="/settings" element={guard("/settings", <SettingsPage />)} />

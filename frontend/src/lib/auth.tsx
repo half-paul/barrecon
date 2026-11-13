@@ -30,6 +30,6 @@ export function useReadOnly(area?: string) {
 /** The area each page belongs to; null: every logged-in user. "users" is admin only (users and businesses). */
 export const PAGE_AREA: Record<string, string | null> = {
   "/": null, "/account": null, "/counts": "counts", "/deliveries": "deliveries", "/sales": "sales",
-  "/variance": "variance", "/items": "items", "/items/groups": "items", "/swype-items": "swype_items", "/recipes": "recipes",
+  "/variance": "variance", "/reports/pour-cost": "reports", "/reports/reorder": "reports", "/reports/slow-moving": "reports", "/items": "items", "/items/groups": "items", "/swype-items": "swype_items", "/recipes": "recipes",
   "/imports": "imports", "/settings": "settings", "/users": "users", "/businesses": "users", "/audit": "audit",
 };

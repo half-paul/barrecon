@@ -85,8 +85,14 @@ export type ChartStyle = "bars" | "gap" | "difference";
 /** This login's own choices in the current business (GET/PUT /api/settings/me). */
 export type UserPrefs = { variance_chart_style: ChartStyle };
 export type Settings = { oz_ml: string; variance_threshold_pct: string; count_weekday: number; count_reminder_enabled: boolean; variance_chart_items: string[]; variance_view_added: string[]; variance_view_removed: string[]; swype_auto_import: boolean; swype_auto_import_hour: number; idle_logout_minutes: number; audit_retention_days: number };
-export type MenuSync = { new: number; renamed: number; unchanged: number; reactivated: number; deactivated?: number; new_items: string[] };
-export type SwypeItem = { code: string; name: string; swype_name: string; renamed: boolean; category: string | null; is_active: boolean; source: string; sold: number; last_sold: string | null };
+export type PriceAlert = { code: string; name: string; price: number; catalogue_price: number; change_pct: number; price_period_to: string | null };
+export type MenuSync = { new: number; renamed: number; unchanged: number; reactivated: number; deactivated?: number; new_items: string[];
+  price_alerts?: PriceAlert[]; threshold_pct?: number };
+export type SwypeItem = { code: string; name: string; swype_name: string; renamed: boolean; category: string | null; is_active: boolean; source: string; sold: number; last_sold: string | null;
+  /** Amt / Qty from the latest Item Sales period with paid units. */
+  price: number | null; price_period_to: string | null;
+  /** "Default Price" from Swype's Export Item file. */
+  catalogue_price: number | null; price_change_pct: number | null; price_alert: boolean };
 export type ImportSummary = { dataset: string; status: string; inserted: number; updated: number; duplicate: number; errors: number; sessions_created: string[]; rows: { row: number; status: string; message: string }[] };
 
 export const n = (v: string | number | null | undefined, dp = 2) => v == null || v === "" ? "" : Number(v).toLocaleString("en-CA", { maximumFractionDigits: dp });
@@ -146,7 +152,13 @@ export type CurrentPeriod = {
   days: number; missing_sales_days: string[]; unmapped: number; deliveries: number;
   last_variance: { opening_at: string; closing_at: string } | null;
 };
-export const menuText = (m: MenuSync) => `${m.new} new Swype items, ${m.renamed} renamed, ${m.unchanged} unchanged${m.reactivated ? `, ${m.reactivated} switched back on (sold)` : ""}${m.deactivated ? `, ${m.deactivated} switched off (nothing sold in a month)` : ""} (no stock items are created; recipes link Swype items to stock)`;
+export const menuText = (m: MenuSync) => `${m.new} new Swype items, ${m.renamed} renamed, ${m.unchanged} unchanged${m.reactivated ? `, ${m.reactivated} switched back on (sold)` : ""}${m.deactivated ? `, ${m.deactivated} switched off (nothing sold in a month)` : ""} (no stock items are created; recipes link Swype items to stock)${priceAlertText(m)}`;
+export const priceAlertText = (m: MenuSync) => {
+  const a = m.price_alerts ?? [];
+  if (!a.length) return "";
+  const list = a.slice(0, 5).map((p) => `${p.name} $${p.price.toFixed(2)} vs $${p.catalogue_price.toFixed(2)}`).join("; ");
+  return `. ⚠ ${a.length} sales price${a.length === 1 ? "" : "s"} off Swype's catalogue by ${m.threshold_pct} % or more: ${list}${a.length > 5 ? `; +${a.length - 5} more on the Swype items page` : ""}`;
+};
 /** Readable names for the import history. */
 const DATASETS: Record<string, string> = {
   legacy: "Inventory workbook", item_sales: "Swype sales", swype_items: "Swype item list", items: "Stock items sheet",

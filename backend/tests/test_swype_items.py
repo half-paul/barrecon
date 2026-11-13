@@ -129,3 +129,70 @@ def test_items_unsold_for_a_month_are_switched_off(db, location):
 
     nov = swype_item_sales.apply(db, report("From 11/01/2026 to 11/01/2026\nAll Price Type"), "nov.xlsx", location.id)
     assert nov["menu"]["reactivated"] == 1 and db.get(SwypeMenuItem, (db.info["business_id"], "00000400")).is_active
+
+
+# ---------- prices: Amt / Qty from the latest sales period, cross-checked with the Export Item file ----------
+
+PRICED_CSV = ("﻿Item Code,Category Code,Item Desc1,Status,Default Price,Single Price\r\n"
+              "00000400,000020,Lager 20oz,A,9.00,\r\n"          # matches the sales price
+              "00000330_01,000020,Smirnoff Vodka SNG,A,7.00,\r\n"  # sells at 8.00: +14.3 %
+              "00000001,000004,Open Food,A,0.0,\r\n").encode()  # open price: never compared
+
+
+def _menu(db, code):
+    return db.get(SwypeMenuItem, (db.info["business_id"], code))
+
+
+def test_sales_import_sets_price_from_latest_period_with_paid_units(db, location):
+    from datetime import date
+    swype_item_sales.apply(db, report(), "wk1.xlsx", location.id)  # lager 10 for 90.00, vodka SNG 4 for 32.00
+    assert _menu(db, "00000400").price == Decimal("9.00") and _menu(db, "00000330_01").price == Decimal("8.00")
+    assert _menu(db, "00000400").price_period_to == date(2026, 10, 25)
+
+    swype_item_sales.apply(db, report("From 10/26/2026 to 11/01/2026\nAll Price Type", draft_qty=20),
+                           "wk2.xlsx", location.id)
+    assert _menu(db, "00000400").price == Decimal("4.50")  # latest period wins (20 for 90.00)
+
+    r = swype_item_sales.apply(db, report("From 11/02/2026 to 11/08/2026\nAll Price Type", draft_qty=0),
+                               "wk3.xlsx", location.id)
+    assert r["menu"]["prices_changed"] == 0
+    assert _menu(db, "00000400").price_period_to == date(2026, 11, 1)  # nothing paid in wk3: wk2 price stays
+
+    swype_item_sales.delete_period(db, location.id, date(2026, 10, 26), date(2026, 11, 1))
+    assert _menu(db, "00000400").price == Decimal("9.00")  # back to wk1 once wk2 is gone
+
+
+def test_export_item_default_price_is_compared_with_the_sales_price(client, db, location):
+    swype_item_sales.apply(db, report(), "wk1.xlsx", location.id)
+    r = swype_items.apply_csv(db, PRICED_CSV, "export_items.csv", location.id)
+    assert r["status"] == "ok" and r["threshold_pct"] == 10
+    assert [(a["code"], a["price"], a["catalogue_price"], a["change_pct"]) for a in r["price_alerts"]] == \
+        [("00000330_01", 8.0, 7.0, 14.3)]
+    assert _menu(db, "00000001").catalogue_price == Decimal("0.00")
+
+    items = {i["code"]: i for i in client.get("/api/swype-items").json()}
+    assert items["00000330_01"]["price_alert"] and items["00000330_01"]["catalogue_price"] == 7.0
+    assert not items["00000400"]["price_alert"] and items["00000400"]["price_change_pct"] == 0
+    assert items["00000001"]["price_change_pct"] is None and not items["00000001"]["price_alert"]
+    assert [a["code"] for a in client.get("/api/swype-items/price-alerts").json()["price_alerts"]] == ["00000330_01"]
+
+    # an older export without the price column leaves catalogue prices alone
+    swype_items.apply_csv(db, CSV, "old_export.csv", location.id)
+    assert _menu(db, "00000330_01").catalogue_price == Decimal("7.00")
+
+
+def test_export_item_bad_price_rejects_the_file(db, location):
+    bad = PRICED_CSV.replace(b"7.00", b"seven")
+    r = swype_items.apply_csv(db, bad, "bad.csv", location.id)
+    assert r["status"] == "rejected" and "Default Price" in r["error"]
+
+
+def test_real_export_file_parses_default_prices():
+    from pathlib import Path
+
+    import pytest
+    f = Path(__file__).parents[2] / "scripts/csv_export_api/export_items_20261028180636.csv"
+    if not f.exists():
+        pytest.skip("real Swype export is gitignored; only on machines that pulled one")
+    rows = swype_items.parse_csv(f.read_bytes())
+    assert len(rows) == 895 and sum(1 for r in rows if r["catalogue_price"]) == 880
