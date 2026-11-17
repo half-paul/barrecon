@@ -36,7 +36,7 @@ ADDED_COLUMNS = {
     "users": {"pin_hash": "VARCHAR(255)", "email": "VARCHAR(254)", "totp_secret": "VARCHAR(255)",
               "totp_enabled_at": "TIMESTAMP WITH TIME ZONE", "totp_last_step": "INTEGER", "recovery_codes": "JSON",
               "tenant_id": "VARCHAR(36) REFERENCES tenants(id)", "is_platform_admin": "BOOLEAN NOT NULL DEFAULT FALSE",
-              "last_location_id": "VARCHAR(36)"},
+              "last_location_id": "VARCHAR(36)", "deleted_at": "TIMESTAMP WITH TIME ZONE"},
     "audit_events": {"seq": "INTEGER", "prev_hash": "VARCHAR(64)", "hash": "VARCHAR(64)",
                      "tenant_id": "VARCHAR(36)", "location_id": "VARCHAR(36)"},
     "locations": {"tenant_id": "VARCHAR(36) REFERENCES tenants(id)", "kind": "VARCHAR(32)", "address": "VARCHAR(300)",

@@ -115,3 +115,20 @@ def test_recipe_photo(client, db):
     assert client.get("/api/recipes/00000561/photo").status_code == 404
     client.put("/api/recipes/00000561/photo", files={"file": ("p.png", PNG, "image/png")})
     assert client.delete("/api/recipes/00000561").status_code == 204  # photo goes with the recipe
+
+
+def test_sample_workbook_downloads_and_imports_as_is(client, db):
+    vodka(db)
+    db.commit()
+    r = client.get("/api/recipes/template.xlsx")
+    assert r.status_code == 200 and "Recipes-sample.xlsx" in r.headers["content-disposition"]
+    from openpyxl import load_workbook
+    import io
+    wb = load_workbook(io.BytesIO(r.content))
+    assert wb.sheetnames == ["Recipes", "Items", "Stock items", "Legend"]
+    assert [c.value for c in wb["Stock items"][2]][0] == "VOD"
+    res = client.post("/api/recipes/import", files={"file": ("sample.xlsx", r.content)}).json()
+    assert res["status"] == "ok" and res["inserted"] == 3, res
+    menu = {m["code"]: m["recipe"] for m in client.get("/api/recipes/menu").json() if m.get("recipe")}
+    assert menu["00000563"]["ignored"] is True
+    assert menu["00000561"]["steps"].startswith("Lime juice 0.75 oz (fresh squeezed)")

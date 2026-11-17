@@ -186,7 +186,7 @@ def queue(db: Session, location_id: str) -> dict:
     renamed = swype_items.custom_names(db)
     track_food = tracks_food(db, location_id)
     rows, no_stock = [], 0
-    for r in sorted(rec.sold_codes(db, location_id), key=lambda r: -r["sold"]):
+    for r in sorted(rec.sold_codes(db, location_id, rec.recent_from()), key=lambda r: -r["sold"]):
         if r["code"] in recipes:
             continue
         if is_no_stock(r, track_food):

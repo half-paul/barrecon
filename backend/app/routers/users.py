@@ -8,12 +8,14 @@ from sqlalchemy.orm import Session
 from .. import audit, auth, tenancy
 from ..config import settings
 from ..db import get_db
-from ..models import AuditChange, AuditEvent, BusinessMember, Location, Tenant, User, utcnow
+from ..models import AuditChange, AuditEvent, BusinessMember, Location, Tenant, User, UserPref, utcnow
 from ..schemas import AuditOut, PasswordResetIn, PinSetIn, UserIn, UserOut, UserPatch
 from ..services import logins, mail
 
 router = APIRouter(prefix="/api/users", tags=["users"], dependencies=[auth.Admin])
 audit_router = APIRouter(prefix="/api/audit", tags=["audit"], dependencies=[auth.perm("audit")])
+
+DELETED = "!deleted"  # password_hash of a deleted login; matches no password
 
 
 def _clean_permissions(p: dict[str, str]) -> dict[str, str]:
@@ -69,7 +71,7 @@ def _out(u: User, db: Session) -> UserOut:
 
 def _get(db: Session, user_id: str) -> User:
     u = db.get(User, user_id)
-    if not u:
+    if not u or u.deleted_at:
         raise HTTPException(404, "user not found")
     return u
 
@@ -101,7 +103,8 @@ def _other_admins(db: Session, user_id: str) -> int:
 
 @router.get("", response_model=list[UserOut])
 def list_users(db: Session = Depends(get_db)):
-    return [_out(u, db) for u in db.query(User).order_by(User.is_active.desc(), func.lower(User.display_name))]
+    return [_out(u, db) for u in db.query(User).filter(User.deleted_at.is_(None))
+            .order_by(User.is_active.desc(), func.lower(User.display_name))]
 
 
 @router.post("", response_model=UserOut, status_code=201)
@@ -172,6 +175,33 @@ def update_user(user_id: str, body: UserPatch, me: User = auth.Admin, db: Sessio
             u.session_version += 1  # logged out everywhere
     db.commit()
     return _out(u, db)
+
+
+@router.delete("/{user_id}", status_code=204)
+def delete_user(user_id: str, me: User = auth.Admin, db: Session = Depends(get_db)):
+    """Remove a login for good. The row stays, because audit events point at it and are hash-chained: the log keeps
+    showing who did what. Everything that could sign in or identify the person is scrubbed; the display name stays
+    for the audit person filter, and the username and email become free for a new login."""
+    u = _get(db, user_id)
+    if u.id == me.id:
+        raise HTTPException(409, "You can't delete your own login. Ask another admin.")
+    if u.is_admin and u.is_active and not _other_admins(db, u.id):
+        raise HTTPException(409, "This is the last active admin. Make someone else an admin first.")
+    logins.revoke(db, u, "invite", "reset", "mfa_email")
+    logins.clear_mfa(u)
+    db.query(BusinessMember).filter(BusinessMember.user_id == u.id).delete(synchronize_session=False)
+    db.query(UserPref).filter(UserPref.user_id == u.id).delete(synchronize_session=False)
+    u.username = f"deleted-{u.id}"
+    u.email = None
+    u.password_hash = DELETED
+    u.pin_hash = None
+    u.is_admin = False
+    u.is_active = False
+    u.permissions = {}
+    u.last_location_id = None
+    u.session_version += 1  # logged out everywhere
+    u.deleted_at = utcnow()
+    db.commit()
 
 
 @router.post("/{user_id}/password", response_model=UserOut)
@@ -254,10 +284,15 @@ def _local_start(d: date) -> datetime:
 
 @audit_router.get("/users")
 def audit_users(db: Session = Depends(get_db), me: User = auth.Auth):
-    """For the audit log's person filter: the people who can work in this business (its members and the tenant's admins)."""
+    """For the audit log's person filter: the people who can work in this business (its members and the tenant's
+    admins), plus deleted logins that left entries in this log."""
     members = db.query(BusinessMember.user_id).filter(BusinessMember.location_id == me.session_business)
-    people = db.query(User).filter(User.tenant_id == me.tenant_id, or_(User.is_admin.is_(True), User.id.in_(members)))
-    return [{"id": u.id, "username": u.username, "display_name": u.display_name, "is_active": u.is_active}
+    acted = db.query(AuditEvent.user_id).filter(_here(me), AuditEvent.user_id.isnot(None)).distinct()
+    people = db.query(User).filter(User.tenant_id == me.tenant_id, or_(
+        and_(User.deleted_at.is_(None), or_(User.is_admin.is_(True), User.id.in_(members))),
+        and_(User.deleted_at.isnot(None), User.id.in_(acted))))
+    return [{"id": u.id, "username": u.username, "display_name": u.display_name, "is_active": u.is_active,
+             "deleted": u.deleted_at is not None}
             for u in people.order_by(func.lower(User.display_name))]
 
 

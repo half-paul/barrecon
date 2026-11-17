@@ -111,6 +111,21 @@ def test_reopen_and_void_retract_movements(client, read_as):
     assert client.get("/api/deliveries").json() == []
 
 
+def test_find_deliveries_by_stock_item(client, read_as):
+    vodka, beer = items(client)
+    d = upload(client)
+    client.put(f"/api/deliveries/{d['id']}", json=body(
+        d, l0={"item_id": vodka["id"], "packs": 2}, l1={"item_id": vodka["id"], "packs": 1}, l2={"skip": True}))
+    upload(client)  # a second draft, nothing matched yet
+    assert [it["sku"] for it in client.get("/api/deliveries/items").json()] == ["VOD"]
+    found = client.get(f"/api/deliveries?item_id={vodka['id']}").json()
+    assert [x["id"] for x in found] == [d["id"]]
+    m = found[0]["item_match"]
+    assert D(m["packs"]) == 3 and D(m["spend"]) == D("114.98") and len(m["lines"]) == 2
+    assert client.get(f"/api/deliveries?item_id={beer['id']}").json() == []
+    assert len(client.get("/api/deliveries").json()) == 2
+
+
 def test_totals_check_and_duplicate(client, read_as):
     read_as["data"] = {**RECEIPT, "total": 140.00}
     d = upload(client)
@@ -257,3 +272,25 @@ def test_same_words_with_different_skus_post_and_are_remembered_apart(client, re
     # those words alone can't say which product it was
     read_as["data"] = {**RECEIPT, "date": "2026-11-03", "lines": [{"text": words, "qty": 1, "line_total": 10.00}]}
     assert upload(client)["lines"][0]["item_id"] is None
+
+
+def test_a_12_case_and_a_24_case_of_one_beer_keep_their_own_packs_each(client, read_as):
+    """Same bottle, two case sizes, two store SKUs: each SKU remembers how many packs one receipt qty is."""
+    _, beer = sku_items(client)
+    two_cases = {**SKU_RECEIPT, "lines": [
+        {"text": "KOKANEE 12PK BTL", "sku": "1212", "qty": 1, "line_total": 24.00},
+        {"text": "KOKANEE 24PK BTL", "sku": "2424", "qty": 1, "line_total": 45.00},
+    ], "subtotal": 69.00, "tax": None, "total": 69.00}
+    read_as["data"] = two_cases
+    d = upload(client)
+    d = client.put(f"/api/deliveries/{d['id']}", json=body(
+        d, l0={"item_id": beer["id"], "packs": 12}, l1={"item_id": beer["id"], "packs": 24})).json()
+    assert client.post(f"/api/deliveries/{d['id']}/post").status_code == 200
+
+    read_as["data"] = {**two_cases, "date": "2026-11-02", "lines": [
+        {"text": "KOKANEE 12PK BTL", "sku": "1212", "qty": 3, "line_total": 72.00},
+        {"text": "KOKANEE 24PK BTL", "sku": "2424", "qty": 2, "line_total": 90.00},
+    ]}
+    l12, l24 = upload(client)["lines"]
+    assert l12["item_id"] == beer["id"] and D(l12["packs"]) == 36
+    assert l24["item_id"] == beer["id"] and D(l24["packs"]) == 48

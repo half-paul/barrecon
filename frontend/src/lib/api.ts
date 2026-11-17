@@ -67,6 +67,7 @@ export type Movement = { id: string; item_id: string; sku: string; name: string;
 export type DeliverySummary = {
   id: string; store: string | null; occurred_at: string | null; receipt_no: string | null; total: number | null; status: "draft" | "posted" | "void";
   source: string; has_receipt: boolean; line_count: number; item_count: number; spend: number; totals_ok: boolean; price_alerts: number; to_match: number; created_at: string;
+  item_match?: { packs: number; spend: number; lines: string[] }; // only when the list is filtered to one stock item
 };
 export type DeliveryLine = {
   position: number; text: string; receipt_sku: string | null; receipt_qty: number; line_total: number | null; item_id: string | null; packs: number | null; skip: boolean; matched_by: string | null;
@@ -189,3 +190,5 @@ export type AuditEvent = { id: string; at: string; user_id: string | null; usern
   area: string | null; method: string | null; route: string | null; path: string | null; status: number | null; ip: string | null;
   detail: Record<string, unknown> | null; label: string; link: string | null; changes: number };
 export type AuditChange = { table: string; row_id: string | null; op: string; changes: Record<string, unknown> | null };
+/** Money amount: always exactly 2 decimals so columns line up and sort reads right. */
+export const cents = (v: string | number | null | undefined) => v == null || v === "" ? "" : Number(v).toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });

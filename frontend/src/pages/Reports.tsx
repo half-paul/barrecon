@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, d, n } from "../lib/api";
+import { api, d, n, cents } from "../lib/api";
 import { Button, Empty, Loading, Nil, Notice, Page, inputCls, useAsync } from "../lib/ui";
 import { Tile } from "./BarPerformance";
 
 type Num = string | number;
 const num = (x: Num | null | undefined) => x == null ? null : Number(x);
-const money = (x: Num | null | undefined, dp = 0) => x == null ? "—" : `${Number(x) < 0 ? "−" : ""}$${n(Math.abs(Number(x)), dp)}`;
+const money = (x: Num | null | undefined, dp = 0) => x == null ? "—" : `${Number(x) < 0 ? "−" : ""}$${cents(Math.abs(Number(x)))}`;
 const pct = (x: Num | null | undefined, dp = 1) => x == null ? "—" : `${n(x, dp)}%`;
 const day = (s: string | null | undefined) => s ? d(s.length === 10 ? `${s}T12:00:00` : s) : "";
 const plural = (k: number, w: string) => `${k} ${w}${k === 1 ? "" : "s"}`;
@@ -78,17 +78,37 @@ const FLAG: Record<string, [string, "bad" | "warn" | "info", string]> = {
   missing_cost: ["Missing cost", "info", "An ingredient has no pack cost, so the drink can't be costed"],
 };
 
+type PourSort = "name" | "sold" | "price" | "serve_cost" | "pour_cost_pct" | "margin" | "gross_profit";
+
 export function PourCostReport() {
   const k = useKnobs({ days: 28, target: 25, rise: 5 });
   const r = useAsync(() => api.get<PourReport>(`/api/reports/pour-cost?${k.query}`), [k.query]);
   const [show, setShow] = useState<"flagged" | "all">("flagged");
   const p = r.data;
   const rows = p ? (show === "flagged" ? p.rows.filter((x) => x.flags.length) : p.rows) : [];
+  const [sort, setSort] = useState<{ key: PourSort; desc: boolean } | null>(null);
   const byCat = useMemo(() => {
     const m = new Map<string, PourRow[]>();
     for (const x of rows) m.set(x.category, [...(m.get(x.category) ?? []), x]);
+    if (sort) {
+      const val = (x: PourRow) => sort.key === "name" ? x.name.toLowerCase() : num(x[sort.key]);
+      for (const xs of m.values()) xs.sort((a, b) => {
+        const va = val(a), vb = val(b);
+        if (va == null || vb == null) return va == null ? (vb == null ? 0 : 1) : -1; // nulls last
+        const c = va < vb ? -1 : va > vb ? 1 : 0;
+        return sort.desc ? -c : c;
+      });
+    }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [rows]);
+  }, [rows, sort]);
+  const Th = ({ k, children }: { k: PourSort; children: React.ReactNode }) => (
+    <th className={k === "name" ? "" : "r"} aria-sort={sort?.key === k ? (sort.desc ? "descending" : "ascending") : "none"}>
+      <button type="button" className="hover:text-ink whitespace-nowrap"
+        onClick={() => setSort((s) => ({ key: k, desc: s?.key === k ? !s.desc : k !== "name" }))}>
+        {children}{sort?.key === k ? (sort.desc ? " ↓" : " ↑") : ""}
+      </button>
+    </th>
+  );
 
   return (
     <Page title="Pour cost & profitability" area="reports"
@@ -142,7 +162,7 @@ export function PourCostReport() {
         </div>
         {rows.length === 0 ? <Empty>{p.rows.length ? "Nothing flagged: every costed drink is under target with steady costs." : "No sold drinks with recipes in this window. Import Swype sales and add recipes first."}</Empty> : (
           <div className="table-box"><table className="grid">
-            <thead><tr><th>Drink</th><th className="r">Sold</th><th className="r">Avg price</th><th className="r">Cost / serve</th><th className="r">Pour cost</th><th className="r">Margin</th><th className="r">Gross profit</th><th>Flags</th></tr></thead>
+            <thead><tr><Th k="name">Drink</Th><Th k="sold">Sold</Th><Th k="price">Avg price</Th><Th k="serve_cost">Cost / serve</Th><Th k="pour_cost_pct">Pour cost</Th><Th k="margin">Margin</Th><Th k="gross_profit">Gross profit</Th><th>Flags</th></tr></thead>
             <tbody>{byCat.map(([cat, xs]) => (<Fragment key={cat}>
               <tr className="section"><td colSpan={8}>{cat} <span className="text-faint font-normal">{xs.length}</span></td></tr>
               {xs.map((x) => (

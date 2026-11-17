@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { api, d, n } from "../lib/api";
+import { api, d, n, cents } from "../lib/api";
 import { can, useMe } from "../lib/auth";
 import { useAsync } from "../lib/ui";
 
@@ -14,7 +14,7 @@ export type Performance = {
   stock: { value: Num; counted_at: string; uncosted: number } | null;
 };
 
-const money = (x: Num) => `${Number(x) < 0 ? "−" : ""}$${n(Math.abs(Number(x)), 0)}`;
+const money = (x: Num) => `${Number(x) < 0 ? "−" : ""}$${cents(Math.abs(Number(x)))}`;
 const day = (s: string) => d(`${s}T12:00:00`);
 
 /** The Overview's owner stats: sales, beverage cost, variance and stock value. Needs Stock vs sales access. */

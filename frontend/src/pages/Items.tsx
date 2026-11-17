@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Group, type ImportSummary, type Item, groupBy, n } from "../lib/api";
 import { useMe, useReadOnly } from "../lib/auth";
-import { Button, Empty, Field, FileButton, Flash, inputCls, Loading, Nil, Notice, Page, useAsync } from "../lib/ui";
+import { Button, Empty, Field, FileButton, Flash, Help, inputCls, Loading, Nil, Notice, Page, useAsync } from "../lib/ui";
 
 type Units = { code: string; dimension: string }[];
 const blank = { sku: "", name: "", category: "Spirits", stock_unit: "ml", pack_name: "bottle", pack_size: "750", case_size: "12", pack_cost: "", par_level: "" };
@@ -83,15 +83,15 @@ export default function Items() {
       {msg && <Flash kind={msg.kind} onClose={() => setMsg(null)}>{msg.text}</Flash>}
       {adding && (
         <div className="card grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6 p-5">
-          <Field label="SKU (BCLDB no. or your own code)"><input className={inputCls} value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} /></Field>
+          <Field label={<>SKU (BCLDB no. or your own code)<Help term="sku" /></>}><input className={inputCls} value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} /></Field>
           <Field label="Name"><input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Group" hint="Picking a group fills in its unit and pack"><input className={inputCls} list="item-groups" value={form.category} onChange={(e) => setCategory(e.target.value)} /></Field>
-          <Field label="Counted in" hint={food ? "ml for liquids, each for cans/bottles of beer, kg, lb or g for food" : "ml for liquids, each for cans/bottles of beer"}><select className={inputCls} value={form.stock_unit} onChange={(e) => setForm({ ...form, stock_unit: e.target.value })}>{(units.data ?? []).map((u) => <option key={u.code}>{u.code}</option>)}</select></Field>
-          <Field label="Pack name"><input className={inputCls} value={form.pack_name} onChange={(e) => setForm({ ...form, pack_name: e.target.value })} /></Field>
-          <Field label="Pack size (in counted unit)" hint={food ? "750 for a 750 ml bottle; 1 for a can; 2.5 for a 2.5 kg bag" : "750 for a 750 ml bottle; 1 for a can"}><input className={`${inputCls} num`} value={form.pack_size} onChange={(e) => setForm({ ...form, pack_size: e.target.value })} /></Field>
-          <Field label="Packs per case / flat"><input className={`${inputCls} num`} value={form.case_size} onChange={(e) => setForm({ ...form, case_size: e.target.value })} /></Field>
-          <Field label="Cost per pack ($)"><input className={`${inputCls} num`} value={form.pack_cost} onChange={(e) => setForm({ ...form, pack_cost: e.target.value })} /></Field>
-          <Field label="Par (packs)"><input className={`${inputCls} num`} value={form.par_level} onChange={(e) => setForm({ ...form, par_level: e.target.value })} /></Field>
+          <Field label={<>Counted in<Help term="stock_unit" /></>} hint={food ? "ml for liquids, each for cans/bottles of beer, kg, lb or g for food" : "ml for liquids, each for cans/bottles of beer"}><select className={inputCls} value={form.stock_unit} onChange={(e) => setForm({ ...form, stock_unit: e.target.value })}>{(units.data ?? []).map((u) => <option key={u.code}>{u.code}</option>)}</select></Field>
+          <Field label={<>Pack name<Help term="pack" /></>}><input className={inputCls} value={form.pack_name} onChange={(e) => setForm({ ...form, pack_name: e.target.value })} /></Field>
+          <Field label={<>Pack size (in counted unit)<Help term="pack_size" /></>} hint={food ? "750 for a 750 ml bottle; 1 for a can; 2.5 for a 2.5 kg bag" : "750 for a 750 ml bottle; 1 for a can"}><input className={`${inputCls} num`} value={form.pack_size} onChange={(e) => setForm({ ...form, pack_size: e.target.value })} /></Field>
+          <Field label={<>Packs per case / flat<Help term="case_size" /></>}><input className={`${inputCls} num`} value={form.case_size} onChange={(e) => setForm({ ...form, case_size: e.target.value })} /></Field>
+          <Field label={<>Cost per pack ($)<Help term="cost_per_pack" /></>}><input className={`${inputCls} num`} value={form.pack_cost} onChange={(e) => setForm({ ...form, pack_cost: e.target.value })} /></Field>
+          <Field label={<>Par (packs)<Help term="par" /></>}><input className={`${inputCls} num`} value={form.par_level} onChange={(e) => setForm({ ...form, par_level: e.target.value })} /></Field>
           <div className="col-span-full"><Button onClick={save} disabled={!form.sku || !form.name}>Save item</Button></div>
         </div>
       )}
@@ -123,7 +123,7 @@ export default function Items() {
         <Empty>No items match. <button className="underline" onClick={() => setParams({ status: "all" }, { replace: true })}>Clear filters</button></Empty>)}
       {shownCount > 0 && (
         <div className="table-box"><table className="grid">
-          <thead><tr><th>SKU</th><th>Item</th><th>Group</th><th>Pack</th><th className="r">Pack size</th><th className="r">Per case</th><th className="r">Cost / pack</th><th className="r">Par</th><th className="r">Last count</th><th>Active</th><th /></tr></thead>
+          <thead><tr><th>SKU<Help term="sku" /></th><th>Item</th><th>Group</th><th>Pack<Help term="pack" /></th><th className="r">Pack size<Help term="pack_size" /></th><th className="r">Per case<Help term="case_size" /></th><th className="r">Cost / pack<Help term="cost_per_pack" /></th><th className="r">Par<Help term="par" /></th><th className="r">Last count</th><th>Active</th><th /></tr></thead>
           <tbody>
             {groups.map(([c, rows]) => (
               <Group key={c} cat={c} rows={rows} editing={editing} onEdit={setEditing} onSave={update} open={!!cat || !collapsed.has(c)}

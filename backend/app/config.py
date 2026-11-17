@@ -17,12 +17,7 @@ class Settings(BaseSettings):
     trust_proxy: bool = False
     timezone: str = "America/Vancouver"
     static_dir: str = "app/static"
-    # SwypePOS back office login. Each business now keeps its own (Setup -> Businesses); these are only copied
-    # into the first business when a single-bar database is upgraded.
-    swype_email: str = ""
-    swype_password: str = ""
-    swype_company: str = "caffebarney"
-    swype_store_id: int = 1
+    # The SwypePOS back office login is per business, stored encrypted on the business (Setup -> Businesses).
     # reading store receipts with Claude (services/receipts.py); empty: receipts are entered by hand
     anthropic_api_key: str = ""
     receipt_model: str = "claude-opus-5-5"

@@ -21,6 +21,7 @@ import SettingsPage from "./pages/Settings";
 import Recipes from "./pages/Recipes";
 import Variance from "./pages/Variance";
 import { PourCostReport, ReorderReport, SlowMovingReport } from "./pages/Reports";
+import ItemSalesReport from "./pages/ItemSales";
 import Groups from "./pages/Groups";
 import DeliveryEntry from "./pages/DeliveryEntry";
 import Deliveries from "./pages/Deliveries";
@@ -34,11 +35,11 @@ import Platform from "./pages/Platform";
 
 // The weekly loop in the order it is done, then the things set up once and changed now and then.
 const weekly = [["/", "Overview"], ["/counts", "Counts"], ["/deliveries", "Deliveries"], ["/sales", "Sales"], ["/variance", "Stock vs sales"]] as const;
-const reports = [["/reports/pour-cost", "Pour cost"], ["/reports/reorder", "Purchasing"], ["/reports/slow-moving", "Slow-moving stock"]] as const;
+const reports = [["/reports/item-sales", "Item sales"], ["/reports/pour-cost", "Pour cost"], ["/reports/reorder", "Purchasing"], ["/reports/slow-moving", "Slow-moving stock"]] as const;
 const setup = [["/items", "Stock items"], ["/items/groups", "Item groups"], ["/swype-items", "Swype items"], ["/recipes", "Recipes"], ["/imports", "Imports"], ["/settings", "Settings"],
   ["/businesses", "Businesses"], ["/users", "Users"], ["/audit", "Audit log"]] as const;
 const nav = [...weekly, ...reports, ...setup];
-const ICONS: Record<string, IconName> = { "/": "home", "/counts": "counts", "/deliveries": "truck", "/sales": "sales", "/variance": "scale", "/reports/pour-cost": "glass", "/reports/reorder": "truck", "/reports/slow-moving": "history",
+const ICONS: Record<string, IconName> = { "/": "home", "/counts": "counts", "/deliveries": "truck", "/sales": "sales", "/variance": "scale", "/reports/item-sales": "sales", "/reports/pour-cost": "glass", "/reports/reorder": "truck", "/reports/slow-moving": "history",
   "/items": "box", "/items/groups": "layers", "/swype-items": "tag", "/recipes": "recipe", "/imports": "upload", "/settings": "settings",
   "/businesses": "building", "/users": "users", "/audit": "history" };
 /** Only the pages this login may open. */
@@ -261,6 +262,7 @@ export default function App() {
           <Route path="/recipes" element={guard("/recipes", <Recipes />)} />
           <Route path="/variance" element={guard("/variance", <Variance />)} />
           <Route path="/reports" element={<Navigate to="/reports/pour-cost" replace />} />
+          <Route path="/reports/item-sales" element={guard("/reports/item-sales", <ItemSalesReport />)} />
           <Route path="/reports/pour-cost" element={guard("/reports/pour-cost", <PourCostReport />)} />
           <Route path="/reports/reorder" element={guard("/reports/reorder", <ReorderReport />)} />
           <Route path="/reports/slow-moving" element={guard("/reports/slow-moving", <SlowMovingReport />)} />

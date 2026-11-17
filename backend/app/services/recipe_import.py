@@ -23,17 +23,18 @@ import io
 import re
 from decimal import Decimal
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.worksheet.datavalidation import DataValidation
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Unit
+from ..models import InventoryItem, Unit
 from ..units import BASE_UNITS, ConversionError
 from . import inventory as inv
 from . import recipes as rec
 from . import settings_svc
-from .xlsx_io import (ITEM_COLS, ImportResult, RowResult, _dec, _record_batch, _reject_duplicate_file, _rows,
-                      _sheet, parse_item_rows, sha256)
+from .xlsx_io import (FONT, ITEM_COLS, ImportResult, RowResult, _bytes, _dec, _record_batch,
+                      _reject_duplicate_file, _rows, _sheet, _style_header, parse_item_rows, sha256)
 
 RECIPE_COLS = ["swype_code", "drink", "ingredient", "sku", "qty", "unit", "note"]
 NOTE_RE = re.compile(r"^notes?\s*:\s*", re.I)
@@ -55,6 +56,76 @@ def _text(v) -> str:
 def _untracked(ingredient: str, qty: Decimal | None, unit: str, note: str) -> str:
     amount = f"{qty.normalize():f} {unit}".strip() if qty is not None else ""
     return " ".join(x for x in (ingredient, amount, f"({note})" if note else "") if x)
+
+
+SAMPLE_RECIPES = [
+    # one row per ingredient; the Margarita shows every kind of row
+    ["00000561", "Margarita", "Tequila", "EXAMPLE-TEQUILA", 1.5, "oz", None],
+    ["00000561", "Margarita", "Triple sec", "EXAMPLE-TRIPLESEC", 0.75, "oz", None],
+    ["00000561", "Margarita", "Lime juice", None, 0.75, "oz", "fresh squeezed"],
+    ["00000561", "Margarita", None, None, None, None, "Rocks glass, salt rim. Shake and strain over ice."],
+    ["00000561", "Margarita", None, None, None, None, "Note: house spec, 1.5 oz pour"],
+    ["00000562", "House Wine (6 oz)", "Red wine", "EXAMPLE-WINE-A | EXAMPLE-WINE-B", 6, "oz", None],
+    ["00000563", "Virgin Mojito", "Mint, lime, soda", None, None, None, "takes no tracked stock"],
+]
+SAMPLE_ITEMS = [
+    ["EXAMPLE-TEQUILA", "Example Tequila 750", "Spirits", "ml", "bottle", 750, 12, 32.5, None, None, 2, True],
+    ["EXAMPLE-TRIPLESEC", "Example Triple Sec 750", "Liqueurs", "ml", "bottle", 750, 12, 18.0, None, None, 1, True],
+    ["EXAMPLE-WINE-A", "Example Red Box A 4L", "Wine", "ml", "box", 4000, 1, 45.0, None, None, 1, True],
+    ["EXAMPLE-WINE-B", "Example Red Box B 4L", "Wine", "ml", "box", 4000, 1, 45.0, None, None, 1, True],
+]
+SAMPLE_LEGEND = [
+    "Recipes: one row per ingredient. Rows with the same swype_code make one drink. Replace the example rows with your own.",
+    "swype_code: the Swype item # (8 digits, keep the leading zeros; the column is formatted as text).",
+    "sku: the stock item the portion is poured from (see the 'Stock items' tab for what the portal already has).",
+    "  Several skus split by | (\"BOXA | BOXB\") = the portion comes out of whichever one is open.",
+    "  No sku = an ingredient the bar doesn't count (juice, syrup, garnish); it goes into the preparation steps.",
+    "qty + unit: the portion. unit is oz when blank. Units: " + ", ".join(sorted(BASE_UNITS)) + ".",
+    "A row with only a note (glass, garnish, method) goes into the preparation steps.",
+    "  A note starting with 'Note:' is a recipe note instead (why the portions are what they are).",
+    "A drink with no row that has a sku is saved as taking no tracked stock.",
+    "Items tab (optional): bottles the recipes need that the portal doesn't have yet, same columns as the Stock items sheet.",
+    "  Delete the EXAMPLE rows there, or they will be created as items.",
+    "Any other tab (like 'Stock items' and this one) is ignored on upload. A file is all-or-nothing: one bad row rejects it.",
+]
+
+
+def sample_workbook(db: Session) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Recipes"
+    _style_header(ws, RECIPE_COLS, {"swype_code": 12, "drink": 22, "ingredient": 22, "sku": 34, "note": 50})
+    for r in SAMPLE_RECIPES:
+        ws.append(r)
+    for row in ws.iter_rows(min_row=2):
+        for c in row:
+            c.font = FONT
+    for row in range(2, 1001):
+        ws.cell(row, 1).number_format = "@"
+    units = sorted(BASE_UNITS)
+    dv = DataValidation(type="list", formula1='"' + ",".join(units) + '"', allow_blank=True)
+    ws.add_data_validation(dv)
+    dv.add("F2:F1000")
+
+    it = wb.create_sheet("Items")
+    _style_header(it, ITEM_COLS, {"sku": 20, "name": 30, "category": 16})
+    for r in SAMPLE_ITEMS:
+        it.append(r)
+    for row in it.iter_rows(min_row=2):
+        for c in row:
+            c.font = FONT
+
+    ref = wb.create_sheet("Stock items")
+    _style_header(ref, ["sku", "name", "category", "stock_unit"], {"sku": 20, "name": 36, "category": 18})
+    for item in db.scalars(select(InventoryItem).where(InventoryItem.is_active.is_(True))
+                           .order_by(InventoryItem.category, InventoryItem.name)):
+        ref.append([item.sku, item.name, item.category, item.stock_unit])
+
+    lg = wb.create_sheet("Legend")
+    lg.column_dimensions["A"].width = 140
+    for i, line in enumerate(SAMPLE_LEGEND, 1):
+        lg.cell(i, 1, line).font = FONT
+    return _bytes(wb)
 
 
 def import_recipes(db: Session, data: bytes, file_name: str) -> ImportResult:

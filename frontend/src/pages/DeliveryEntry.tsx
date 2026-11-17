@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Item, groupBy, n } from "../lib/api";
-import { Button, Field, Flash, inputCls, Nil, Notice, Page, useAsync } from "../lib/ui";
+import { api, type Item, groupBy, n, cents } from "../lib/api";
+import { Button, Field, Flash, Help, inputCls, Nil, Notice, Page, useAsync } from "../lib/ui";
 
 // One invoice on one sheet, like a count: every active item is listed and only the rows with a quantity are saved.
 // Saving posts it as a delivery, listed under Deliveries. The unsaved sheet is kept in this browser so leaving the
@@ -52,7 +52,7 @@ export default function DeliveryEntry() {
   };
 
   return (
-    <Page area="deliveries" title="Record a delivery" sub={entered.length ? `${entered.length} item${entered.length === 1 ? "" : "s"} on this sheet${spend ? ` · $${n(spend, 2)}` : ""}` : "Enter what arrived; leave the rest empty"} actions={<>
+    <Page area="deliveries" title="Record a delivery" sub={entered.length ? `${entered.length} item${entered.length === 1 ? "" : "s"} on this sheet${spend ? ` · $${cents(spend)}` : ""}` : "Enter what arrived; leave the rest empty"} actions={<>
       <Link className="text-sm underline" to="/deliveries">All deliveries</Link>
       {(entered.length > 0 || d.ref) && <button className="text-sm text-muted hover:text-ink underline" onClick={clear}>Clear sheet</button>}
       <Button onClick={save} disabled={saving || !d.ref.trim() || entered.length === 0 || bad.length > 0}>{saving ? "Saving…" : `Save ${entered.length || ""} item${entered.length === 1 ? "" : "s"}`}</Button>
@@ -72,7 +72,7 @@ export default function DeliveryEntry() {
       {items.error && <Notice kind="error">{items.error}</Notice>}
       {shown.length === 0 && items.data ? <p className="text-sm text-muted py-6 text-center">{onlyEntered ? "Nothing entered yet." : "No item matches."}</p> : (
         <div className="table-box"><table className="grid">
-          <thead><tr><th>Item</th><th className="max-sm:hidden">Pack</th><th className="r">Cases</th><th className="r">Loose packs</th><th className="r">Cost / pack ($)</th><th className="r max-sm:hidden">Total packs</th><th className="r max-sm:hidden">In stock units</th></tr></thead>
+          <thead><tr><th>Item</th><th className="max-sm:hidden">Pack<Help term="pack" /></th><th className="r">Cases<Help term="case_size" /></th><th className="r">Loose packs<Help term="loose_packs" /></th><th className="r">Cost / pack ($)<Help term="cost_per_pack" /></th><th className="r max-sm:hidden">Total packs<Help text="Total packs = cases × per case + loose packs." /></th><th className="r max-sm:hidden">In stock units<Help term="stock_unit" /></th></tr></thead>
           <tbody>{groups.map(([cat, rows]) => (<GroupRows key={cat} cat={cat} rows={rows} lines={d.lines} setLine={setLine} />))}</tbody>
         </table></div>
       )}

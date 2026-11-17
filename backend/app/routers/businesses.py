@@ -248,14 +248,14 @@ def members(business_id: str, db: Session = Depends(get_db)):
     return [{"user_id": u.id, "username": u.username, "display_name": u.display_name, "is_admin": u.is_admin,
              "is_active": u.is_active, "member": u.is_admin or u.id in have,
              "permissions": dict(have[u.id].permissions or {}) if u.id in have else {}}
-            for u in db.query(User).order_by(User.is_active.desc(), func.lower(User.display_name))]
+            for u in db.query(User).filter(User.deleted_at.is_(None)).order_by(User.is_active.desc(), func.lower(User.display_name))]
 
 
 @router.put("/{business_id}/members/{user_id}", dependencies=[auth.Admin])
 def set_member(business_id: str, user_id: str, body: MemberIn, db: Session = Depends(get_db)):
     b = _get(db, business_id)
     u = db.get(User, user_id)
-    if not u:
+    if not u or u.deleted_at:
         raise HTTPException(404, "user not found")
     perms = _clean_permissions(body.permissions)
     m = db.get(BusinessMember, (u.id, b.id))

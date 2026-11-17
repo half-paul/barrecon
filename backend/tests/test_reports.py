@@ -64,3 +64,24 @@ def test_slow_moving(db, location):
 def test_reports_api(client):
     for path in ("pour-cost", "reorder", "slow-moving"):
         assert client.get(f"/api/reports/{path}").status_code == 200
+
+
+def test_item_sales(db, location):
+    prev = (date(2026, 10, 13), date(2026, 10, 19))
+    rec.save(db, "00000561", name="Moscow Mule", lines=[], ignored=True)
+    sale(db, location, "00000561", "Cocktails", Decimal(100), WEEK)
+    sale(db, location, "00000561", "Cocktails", Decimal(80), prev, qty=8)
+    sale(db, location, "00000900", "Food", Decimal(50), WEEK, department="Food", qty=2)
+    sale(db, location, "00000561", "Cocktails", Decimal(999), (date(2026, 9, 1), date(2026, 9, 7)))  # outside
+
+    r = reports.item_sales(db, location.id, date(2026, 10, 13), date(2026, 10, 26))
+    assert [(p["from"], p["net"]) for p in r["periods"]] == [(prev[0], Decimal(80)), (WEEK[0], Decimal(150))]
+    assert r["summary"]["net"] == Decimal(230) and r["summary"]["qty"] == Decimal(20) and r["days_covered"] == 14
+    mule = r["rows"][0]
+    assert mule["name"] == "Moscow Mule" and mule["qty"] == Decimal(18) and mule["net"] == Decimal(180)
+    assert mule["series_net"] == [Decimal(80), Decimal(100)] and mule["avg_price"] == Decimal(10)
+    assert r["rows"][1]["series_qty"] == [Decimal(0), Decimal(2)]
+    assert r["bounds"] == {"from": date(2026, 9, 1), "to": WEEK[1]}
+
+    narrow = reports.item_sales(db, location.id, WEEK[0], WEEK[1])
+    assert len(narrow["periods"]) == 1 and narrow["summary"]["net"] == Decimal(150)

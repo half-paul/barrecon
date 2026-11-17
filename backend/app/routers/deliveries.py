@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..auth import perm
 from ..db import get_db
-from ..models import Delivery, DeliveryReceipt, StockMovement
+from ..models import Delivery, DeliveryLine, DeliveryReceipt, InventoryItem, StockMovement
 from ..schemas import ReceiptDeliveryIn
 from ..tenancy import business_id
 from ..services import deliveries as dlv
@@ -58,19 +58,42 @@ def _get(db: Session, delivery_id: str) -> Delivery:
 
 
 @router.get("")
-def list_deliveries(db: Session = Depends(get_db), include_void: bool = False, limit: int = 200):
+def list_deliveries(db: Session = Depends(get_db), include_void: bool = False, limit: int = 200,
+                    item_id: str | None = None):
+    """With item_id: only deliveries with a line for that stock item, each with how much of it came in."""
     stmt = select(Delivery)
     if not include_void:
         stmt = stmt.where(Delivery.status != "void")
+    if item_id:
+        stmt = stmt.where(Delivery.id.in_(select(DeliveryLine.delivery_id)
+                                          .where(DeliveryLine.item_id == item_id, DeliveryLine.skip.is_(False))))
     rows = db.scalars(stmt.order_by(Delivery.occurred_at.desc().nulls_first(), Delivery.created_at.desc())
                       .limit(limit)).all()
-    return [_summary(db, d) for d in rows]
+    if not item_id:
+        return [_summary(db, d) for d in rows]
+    out = []
+    for d in rows:
+        mine = [ln for ln in d.lines if ln.item_id == item_id and not ln.skip]
+        out.append({**_summary(db, d), "item_match": {
+            "packs": sum((ln.packs for ln in mine if ln.packs is not None), 0),
+            "spend": sum((ln.line_total for ln in mine if ln.line_total is not None), 0),
+            "lines": [ln.text for ln in mine]}})
+    return out
 
 
 @router.get("/stores")
 def stores(db: Session = Depends(get_db)):
     """Store names used before, for the store field's suggestions."""
     return sorted({s for s in db.scalars(select(Delivery.store).where(Delivery.store.is_not(None)))})
+
+
+@router.get("/items")
+def delivered_items(db: Session = Depends(get_db)):
+    """Stock items on any delivery line, for the find-by-item box (no items permission needed)."""
+    rows = db.scalars(select(InventoryItem).where(InventoryItem.id.in_(
+        select(DeliveryLine.item_id).where(DeliveryLine.item_id.is_not(None), DeliveryLine.skip.is_(False))))
+        .order_by(InventoryItem.name)).all()
+    return [{"id": it.id, "sku": it.sku, "name": it.name, "pack_name": it.pack_name, "is_active": it.is_active} for it in rows]
 
 
 @router.get("/reading")

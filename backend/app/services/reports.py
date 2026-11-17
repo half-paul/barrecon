@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -384,3 +384,60 @@ def slow_moving(db: Session, location_id: str, *, days: int = 90, slow_days: int
             "summary": {"tied_up": sum(tied.values(), ZERO), "by_status": dict(tied), "stock_value": stock_value,
                         "items": len(out), "uncosted": sum(1 for x in out if x["value"] is None)},
             "rows": out}
+
+
+# ---------- 4. item sales ----------
+
+def item_sales(db: Session, location_id: str, d0: date | None = None, d1: date | None = None) -> dict:
+    """What sold between two dates: one bucket per Swype sales period (the import granularity), per-item totals,
+    and each item's amount in every bucket so the chart can show a single item. Periods belong to the window
+    their last day falls in, as in the other reports. `bounds` is the full range of sales on file, so the UI
+    can zoom back out."""
+    d1 = d1 or _today()
+    d0 = d0 or d1 - timedelta(days=89)
+    if d0 > d1:
+        d0, d1 = d1, d0
+    rows, covered = _sales(db, location_id, d0, d1)
+    periods = sorted({(r.period_from, r.period_to) for r in rows})
+    index = {p: i for i, p in enumerate(periods)}
+    name = _drink_names(db, rec.load_all(db), rows)
+
+    by_item: dict[str, dict] = {}
+    buckets = [{"from": pf, "to": pt, "qty": ZERO, "net": ZERO} for pf, pt in periods]
+    for r in rows:
+        qty, net, gross = Decimal(r.total_qty), Decimal(r.net_amount), Decimal(r.amount)
+        i = index[(r.period_from, r.period_to)]
+        buckets[i]["qty"] += qty
+        buckets[i]["net"] += net
+        x = by_item.get(r.item_code)
+        if x is None:
+            x = by_item[r.item_code] = {"code": r.item_code, "name": None, "category": r.category,
+                                        "department": r.department, "qty": ZERO, "paid_qty": ZERO,
+                                        "promo_qty": ZERO, "free_qty": ZERO, "gross": ZERO, "net": ZERO,
+                                        "series_qty": [ZERO] * len(periods), "series_net": [ZERO] * len(periods)}
+        x["qty"] += qty
+        x["paid_qty"] += Decimal(r.qty)
+        x["promo_qty"] += Decimal(r.promo_qty or 0)
+        x["free_qty"] += Decimal(r.free_qty or 0)
+        x["gross"] += gross
+        x["net"] += net
+        x["series_qty"][i] += qty
+        x["series_net"][i] += net
+
+    total_net = sum((b["net"] for b in buckets), ZERO)
+    total_qty = sum((b["qty"] for b in buckets), ZERO)
+    out = []
+    for x in by_item.values():
+        x["name"] = name(x["code"])
+        x["avg_price"] = x["net"] / x["qty"] if x["qty"] else None
+        x["share_pct"] = x["net"] / total_net * 100 if total_net else None
+        out.append(x)
+    out.sort(key=lambda x: (-x["net"], -x["qty"], x["name"]))
+
+    first, last = db.execute(select(func.min(SwypeItemSales.period_from), func.max(SwypeItemSales.period_to))
+                             .where(SwypeItemSales.location_id == location_id)).one()
+    return {"from": d0, "to": d1, "days_covered": covered, "bounds": {"from": first, "to": last},
+            "summary": {"qty": total_qty, "net": total_net, "gross": sum((x["gross"] for x in out), ZERO),
+                        "items": len(out), "avg_price": total_net / total_qty if total_qty else None,
+                        "per_day": total_net / covered if covered else None},
+            "periods": buckets, "rows": out}

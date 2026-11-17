@@ -1,27 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type DeliveryDetail, type Item, dt, n } from "../lib/api";
+import { api, type DeliveryDetail, type Item, dt, n, cents } from "../lib/api";
 import { useReadOnly } from "../lib/auth";
-import { Button, Combobox, Field, Flash, Lightbox, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
+import { Button, Combobox, Field, Flash, Help, Lightbox, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
 import { statusChip } from "./Deliveries";
 
 // One delivery: a receipt thumbnail up top, what it puts into stock below. Changes save by themselves;
 // nothing reaches stock until "Post".
 
-type Line = { key: number; text: string; receipt_sku: string | null; receipt_qty: string; line_total: string; item_id: string | null; itemText: string; packs: string; skip: boolean; matched_by: string | null };
+type Line = { key: number; text: string; receipt_sku: string | null; receipt_qty: string; line_total: string; item_id: string | null; itemText: string; per: string; skip: boolean; matched_by: string | null };
 type Form = { store: string; occurred_at: string; receipt_no: string; subtotal: string; tax: string; total: string; note: string; lines: Line[] };
 
 const localInput = (iso: string | null) => { if (!iso) return ""; const t = new Date(iso); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const s = (v: number | string | null | undefined) => v == null ? "" : String(v);
 const num = (v: string) => v.trim() === "" ? null : v.trim();
 const label = (it: { name: string; sku: string }) => `${it.name} · ${it.sku}`;
+const trimNum = (x: number) => String(Number(x.toFixed(4)));
+// a line keeps "packs each" (packs in one receipt Qty); the packs that go into stock are Qty × packs each
+const perOf = (packs: number | string | null, qty: number | string | null) => packs == null || packs === "" ? "" : Number(qty) > 0 ? trimNum(Number(packs) / Number(qty)) : s(packs);
+const packsOf = (l: { per: string; receipt_qty: string }) => l.per.trim() === "" ? null : trimNum((Number(l.receipt_qty) || 1) * Number(l.per));
 let lineKey = 0; // stable row keys, so removing a line doesn’t hand its box’s state to the next row
 
 function toForm(d: DeliveryDetail): Form {
   return {
     store: s(d.store), occurred_at: localInput(d.occurred_at), receipt_no: s(d.receipt_no), subtotal: s(d.subtotal), tax: s(d.tax), total: s(d.total), note: s(d.note),
     lines: d.lines.map((l) => ({ key: ++lineKey, text: l.text, receipt_sku: l.receipt_sku, receipt_qty: s(l.receipt_qty), line_total: s(l.line_total), item_id: l.item_id, itemText: l.item ? label(l.item) : "",
-      packs: s(l.packs), skip: l.skip, matched_by: l.matched_by })),
+      per: perOf(l.packs, l.receipt_qty), skip: l.skip, matched_by: l.matched_by })),
   };
 }
 
@@ -30,7 +34,7 @@ function toBody(f: Form) {
     store: f.store, store_address: null as string | null, occurred_at: f.occurred_at ? new Date(f.occurred_at).toISOString() : null, receipt_no: f.receipt_no,
     subtotal: num(f.subtotal), tax: num(f.tax), total: num(f.total), note: f.note,
     lines: f.lines.filter((l) => l.text.trim()).map((l) => ({ text: l.text.trim(), receipt_sku: l.receipt_sku, receipt_qty: num(l.receipt_qty) ?? "1", line_total: num(l.line_total),
-      item_id: l.skip ? null : l.item_id, packs: l.skip ? null : num(l.packs), skip: l.skip })),
+      item_id: l.skip ? null : l.item_id, packs: l.skip ? null : packsOf(l), skip: l.skip })),
   };
 }
 
@@ -82,9 +86,9 @@ export default function DeliveryReview() {
   const pickItem = (i: number, text: string) => {
     const it = byLabel.get(text);
     const l = f.lines[i];
-    setL(i, { itemText: text, item_id: it?.id ?? null, packs: it && !l.packs ? l.receipt_qty || "1" : l.packs });
+    setL(i, { itemText: text, item_id: it?.id ?? null, per: it && !l.per ? "1" : l.per });
   };
-  const addLine = () => change({ ...f, lines: [...f.lines, { key: ++lineKey, text: "", receipt_sku: null, receipt_qty: "1", line_total: "", item_id: null, itemText: "", packs: "", skip: false, matched_by: null }] });
+  const addLine = () => change({ ...f, lines: [...f.lines, { key: ++lineKey, text: "", receipt_sku: null, receipt_qty: "1", line_total: "", item_id: null, itemText: "", per: "", skip: false, matched_by: null }] });
   const removeLine = (i: number) => change({ ...f, lines: f.lines.filter((_, j) => j !== i) });
 
   const act = async (what: "post" | "reopen" | "void" | "read", confirmText?: string) => {
@@ -110,7 +114,7 @@ export default function DeliveryReview() {
   const toMatch = c.unmatched.length + c.no_packs.length;
   const price = new Map(c.prices.map((p) => [p.position, p]));
   const receiptUrl = `/api/deliveries/${id}/receipt`;
-  const money = (v: number | null) => v == null ? "n/a" : `$${n(v, 2)}`;
+  const money = (v: number | null) => v == null ? "n/a" : `$${cents(v)}`;
 
   return (
     <Page area="deliveries" title={d.store || "Delivery"} sub={<span className="inline-flex items-center gap-2">{d.occurred_at ? dt(d.occurred_at) : "no date yet"} {statusChip(d.status)}</span>} actions={<>
@@ -168,13 +172,15 @@ export default function DeliveryReview() {
         </div>
 
         <div className="table-box"><table className="grid">
-          <thead><tr><th>Receipt line</th><th className="r">Qty</th><th className="r">Amount</th><th>Stock item</th><th className="r">Packs</th><th className="r">$ / pack</th><th title="Not stock: bags, deposits, snacks">Not stock</th>{!ro && <th></th>}</tr></thead>
+          <thead><tr><th>Receipt line<Help term="sku" /></th><th className="r">Qty<Help term="receipt_qty" /></th><th className="r">Amount<Help term="amount" /></th><th>Stock item<Help term="pack" /></th><th className="r">Packs each<Help term="packs_each" /></th><th className="r">$ / pack<Help term="cost_per_pack" /></th><th>Not stock<Help term="not_stock" /></th>{!ro && <th></th>}</tr></thead>
           <tbody>
             {f.lines.map((l, i) => {
               const it = l.item_id ? byId.get(l.item_id) : undefined;
               const p = price.get(i);
-              const packCost = !l.skip && Number(l.packs) > 0 && l.line_total.trim() !== "" ? Number(l.line_total) / Number(l.packs) : null;
-              const need = !ro && !l.skip && (!l.item_id || !(Number(l.packs) > 0));
+              const packs = Number(packsOf(l));
+              const caseN = it ? Number(it.case_size) : 0;
+              const packCost = !l.skip && packs > 0 && l.line_total.trim() !== "" ? Number(l.line_total) / packs : null;
+              const need = !ro && !l.skip && (!l.item_id || !(packs > 0));
               return (
                 <tr key={l.key} className={l.skip ? "text-muted" : need ? "bg-amber-soft/50" : ""}>
                   <td className="min-w-40 w-1/3">{ro ? l.text : <input className="cell-input !text-left !w-full" aria-label={`Line ${i + 1} text`} value={l.text} onChange={(e) => setL(i, { text: e.target.value })} />}
@@ -188,12 +194,19 @@ export default function DeliveryReview() {
                     {l.matched_by === "sku" && !ro && <span className="block text-xs text-muted mt-0.5">matched by SKU</span>}
                   </td>
                   <td className="r w-24">
-                    {!l.skip && (ro ? n(l.packs) : <input className="cell-input num" inputMode="decimal" aria-label={`Line ${i + 1} packs`} value={l.packs} onChange={(e) => setL(i, { packs: e.target.value })} />)}
-                    {!l.skip && it && Number(l.packs) > 0 && <span className="block text-xs text-muted whitespace-nowrap">{it.pack_name ?? "packs"} · {n(Number(l.packs) * Number(it.pack_size), 0)} {it.stock_unit}</span>}
+                    {!l.skip && (ro ? n(l.per) : <input className="cell-input num" inputMode="decimal" aria-label={`Line ${i + 1} packs in one receipt quantity`} value={l.per} onChange={(e) => setL(i, { per: e.target.value })} />)}
+                    {!l.skip && !ro && it && caseN > 1 && (
+                      <span className="flex justify-end gap-1 mt-1">
+                        {[1, caseN].map((v) => (
+                          <button key={v} type="button" onClick={() => setL(i, { per: String(v) })} title={v === 1 ? "The receipt lists single packs" : `The receipt lists cases of ${n(v, 0)}`}
+                            className={`px-1.5 rounded border text-xs ${Number(l.per) === v ? "border-accent text-accent" : "border-line-strong text-muted hover:text-ink"}`}>{v === 1 ? "single" : `case ${n(v, 0)}`}</button>))}
+                      </span>)}
+                    {!l.skip && it && packs > 0 && <span className="block text-xs text-muted whitespace-nowrap">= {n(packs)} {it.pack_name ?? "packs"} · {n(packs * Number(it.pack_size), 0)} {it.stock_unit}</span>}
+                    {!l.skip && !ro && it && caseN > 1 && l.matched_by === "sku" && Number(l.per) === 1 && <span className="block text-xs text-accent whitespace-nowrap">Qty in cases? set packs each</span>}
                   </td>
                   <td className="r num w-24 whitespace-nowrap">
                     {packCost != null && n(packCost, 2)}
-                    {p?.alert && <span className="block text-xs text-accent" title={`was $${n(p.previous, 2)} a pack`}>{p.change_pct! > 0 ? "▲" : "▼"} {n(Math.abs(p.change_pct!), 0)} % vs ${n(p.previous, 2)}</span>}
+                    {p?.alert && <span className="block text-xs text-accent" title={`was $${cents(p.previous)} a pack`}>{p.change_pct! > 0 ? "▲" : "▼"} {n(Math.abs(p.change_pct!), 0)} % vs ${n(p.previous, 2)}</span>}
                   </td>
                   <td className="text-center"><input type="checkbox" disabled={ro} aria-label={`Line ${i + 1} is not stock`} checked={l.skip} onChange={(e) => setL(i, { skip: e.target.checked })} /></td>
                   {!ro && <td><button type="button" className="text-muted hover:text-danger px-1" aria-label={`Remove line ${i + 1}`} onClick={() => removeLine(i)}>✕</button></td>}
@@ -204,7 +217,7 @@ export default function DeliveryReview() {
         </table></div>
         {!ro && <div className="mt-3 flex flex-wrap gap-3 items-center">
           <Button kind="quiet" onClick={addLine}>Add line</Button>
-          <span className="text-xs text-muted">Packs are what goes into stock: a 24-pack line counted in cans is 24. What you set is remembered for this store’s next receipt.</span>
+          <span className="text-xs text-muted">Packs into stock = Qty × Packs each. A case of 24 bottles bought once is Qty 1, Packs each 24. A 12 case and a 24 case of the same beer have different SKUs, and each SKU’s Packs each is remembered for this store’s next receipt.</span>
         </div>}
       </div>
       {zoom && <Lightbox src={receiptUrl} alt="Receipt" onClose={() => setZoom(false)} />}

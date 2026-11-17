@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
@@ -30,3 +31,9 @@ def reorder(days: int = Query(28, ge=1, le=366), lead: int = Query(3, ge=0, le=9
 def slow_moving(days: int = Query(90, ge=7, le=730), slow: int = Query(90, ge=7, le=730),
                 perish: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)):
     return reports.slow_moving(db, business_id(db), days=days, slow_days=slow, perish_days=perish)
+
+
+@router.get("/item-sales")
+def item_sales(date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"),
+               db: Session = Depends(get_db)):
+    return reports.item_sales(db, business_id(db), date_from, date_to)
