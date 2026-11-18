@@ -1,216 +1,322 @@
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { api, type CurrentPeriod, type VarianceReport, type Batch, type CountSession, type Issue, type Item, type Movement, type Settings, d, datasetName, dayRanges, n } from "../lib/api";
-import { Empty, Page, useAsync } from "../lib/ui";
-import BarPerformance from "./BarPerformance";
+import { api, type CountSession, type CurrentPeriod, type Issue, type Item, type Settings, type VarianceReport, cents, d, dayRanges, n } from "../lib/api";
+import { can, useMe } from "../lib/auth";
+import { Icon, type IconName } from "../lib/icons";
+import { useAsync } from "../lib/ui";
+import type { Performance } from "./BarPerformance";
+
+type Num = string | number;
+type SalesReport = { from: string; to: string; days_covered: number; summary: { net: Num; qty: Num }; periods: { from: string; to: string; qty: Num; net: Num }[] };
+type DrinkRow = { code: string; name: string; category: string | null; sold: Num; revenue: Num; theoretical_cost?: Num | null; pour_cost_pct?: Num | null };
+type PourReport = { rows: DrinkRow[]; no_recipe: DrinkRow[] };
+type ReorderRow = { key: string; item_id: string; name: string; stock_unit: string; pack_name: string | null; on_hand: Num | null; on_hand_packs: Num | null;
+  days_left: Num | null; packs: number; cases: number | null; status: "stockout" | "before_delivery" | "reorder" | "no_stock_data" | "excess" | "ok" };
+type ReorderReport = { rows: ReorderRow[]; counted: boolean };
 
 const DAY = 86400000;
+const RANGES = [7, 14, 28] as const;
+const iso = (t: Date) => `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+const atNoon = (s: string) => new Date(`${s}T12:00:00`);
+const short = (t: Date) => t.toLocaleDateString("en-CA", { month: "short", day: "numeric" });
+const money = (x: Num, dp = 0) => `${Number(x) < 0 ? "−" : ""}$${dp ? cents(Math.abs(Number(x))) : n(Math.abs(Number(x)), 0)}`;
+const signed = (x: number, dp = 1) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${n(Math.abs(x), dp)}`;
+const AT_RISK = new Set(["stockout", "before_delivery", "reorder"]);
+
+/** Hide what this login may not see: resolves to null instead of calling an endpoint that would 403. */
+function useIf<T>(ok: boolean, path: string) {
+  return useAsync<T | null>(() => (ok ? api.get<T>(path) : Promise.resolve(null)), [ok, path]);
+}
 
 export default function Home() {
-  const items = useAsync(() => api.get<Item[]>("/api/items"));
+  const me = useMe();
+  const seeVar = can(me, "variance"), seeRep = can(me, "reports");
+  const [days, setDays] = useState<number>(7);
+
+  const today = new Date();
+  const from = new Date(today.getTime() - (days - 1) * DAY);
+  const pTo = new Date(from.getTime() - DAY), pFrom = new Date(from.getTime() - days * DAY);
+
+  const current = useAsync(() => api.get<CurrentPeriod>("/api/variance/current"));
   const counts = useAsync(() => api.get<CountSession[]>("/api/counts"));
-  const issues = useAsync(() => api.get<Issue[]>("/api/imports/issues"));
-  const moves = useAsync(() => api.get<Movement[]>("/api/movements?limit=200"));
-  const batches = useAsync(() => api.get<Batch[]>("/api/imports"));
   const settings = useAsync(() => api.get<Settings>("/api/settings"));
+  const issues = useAsync(() => api.get<Issue[]>("/api/imports/issues"));
+  const items = useAsync(() => api.get<Item[]>("/api/items"));
+  const perf = useIf<Performance>(seeVar, "/api/variance/performance");
+  const variance = useIf<VarianceReport>(seeVar, "/api/variance");
+  const sales = useIf<SalesReport>(seeRep, `/api/reports/item-sales?from=${iso(from)}&to=${iso(today)}`);
+  const prior = useIf<SalesReport>(seeRep, `/api/reports/item-sales?from=${iso(pFrom)}&to=${iso(pTo)}`);
+  const pour = useIf<PourReport>(seeRep, `/api/reports/pour-cost?days=${days}`);
+  const reorder = useIf<ReorderReport>(seeRep, "/api/reports/reorder");
 
-  // a count dated after now (e.g. a legacy "Week 5" put on a future count day) is not the last count
+  // count status: a draft, overdue, or the next count day from Settings (0 = Monday)
   const posted = counts.data?.filter((c) => c.status === "posted") ?? [];
-  const future = posted.filter((c) => new Date(c.counted_at).getTime() > Date.now());
   const last = posted.find((c) => new Date(c.counted_at).getTime() <= Date.now());
+  const future = posted.filter((c) => new Date(c.counted_at).getTime() > Date.now());
   const draft = counts.data?.find((c) => c.status === "draft");
-  const daysSince = last ? Math.floor((Date.now() - new Date(last.counted_at).getTime()) / DAY) : null;
-  const overdue = daysSince != null && daysSince > 7 && settings.data?.count_reminder_enabled !== false;
+  const sinceLast = last ? Math.floor((Date.now() - new Date(last.counted_at).getTime()) / DAY) : null;
+  const remind = settings.data?.count_reminder_enabled !== false;
+  const overdue = remind && sinceLast != null && sinceLast > 7;
+  const cw = settings.data?.count_weekday;
+  const untilCount = cw == null ? null : (cw - (today.getDay() + 6) % 7 + 7) % 7;
+  const countDay = untilCount == null ? null : new Date(today.getTime() + untilCount * DAY);
+  const countWhen = untilCount == null ? "" : untilCount === 0 ? "today" : untilCount === 1 ? "tomorrow" : `on ${countDay!.toLocaleDateString("en-CA", { weekday: "long" })}`;
 
-  const withPar = (items.data ?? []).filter((i) => i.par_level && Number(i.par_level) > 0 && i.last_counted_packs != null)
-    .map((i) => ({ ...i, on: Number(i.last_counted_packs), par: Number(i.par_level) }))
-    .sort((a, b) => a.on / a.par - b.on / b.par);
-  const below = withPar.filter((i) => i.on < i.par);
+  // KPIs
+  const net = sales.data ? Number(sales.data.summary.net) : null;
+  const priorNet = prior.data ? Number(prior.data.summary.net) : null;
+  const salesChange = net != null && priorNet ? (net - priorNet) / priorNet * 100 : null;
+  const bc = perf.data?.beverage_cost, pbc = perf.data?.prior_beverage_cost;
+  const pp = bc?.pct != null && pbc?.pct != null ? Number(bc.pct) - Number(pbc.pct) : null;
+  const unexplained = bc?.variance_cost != null ? Number(bc.variance_cost) : null;
+  const unexplainedPct = unexplained != null && bc && Number(bc.sales) ? Math.abs(unexplained) / Number(bc.sales) * 100 : null;
+  const risks = reorder.data?.rows.filter((r) => AT_RISK.has(r.status)) ?? [];
 
-  const weekAgo = Date.now() - 7 * DAY;
-  const recentDeliveries = (moves.data ?? []).filter((m) => m.kind === "delivery" && new Date(m.occurred_at).getTime() >= weekAgo);
-  const costed = recentDeliveries.filter((m) => m.packs && m.pack_cost);
-  const spend = costed.reduce((s, m) => s + Number(m.packs) * Number(m.pack_cost), 0);
-  const invoices = new Set(recentDeliveries.map((m) => m.external_ref)).size;
+  // variance rows that are off, largest first
+  const vrows = (variance.data?.rows ?? []).filter((r) => r.actual != null && r.variance != null && (r.status === "off" || r.status === "ok"))
+    .sort((a, b) => Math.abs(Number(b.variance_cost ?? b.variance_pct ?? 0)) - Math.abs(Number(a.variance_cost ?? a.variance_pct ?? 0)));
+  const offOver = vrows.filter((r) => r.status === "off" && Number(r.variance) > 0);
+
+  const c = current.data;
+  const attention: Attn[] = [];
+  for (const r of offOver.slice(0, 2))
+    attention.push({ tone: "bad", title: `${r.name} — high unexplained usage`, detail: `${r.variance_cost != null ? `${money(r.variance_cost)} ` : ""}(≈ ${n(r.variance, 1)} ${r.stock_unit})`, to: "/variance" });
+  for (const r of risks.filter((r) => r.status !== "reorder").slice(0, 2))
+    attention.push({ tone: "bad", title: `${r.name} — ${r.status === "stockout" ? "out of stock" : "running low"}`,
+      detail: r.on_hand != null ? `≈ ${n(r.on_hand, 1)} ${r.stock_unit} left${r.days_left != null ? ` (≈ ${n(r.days_left, 0)} days)` : ""}` : "", to: "/reports/reorder" });
+  if (c?.unmapped) attention.push({ tone: "info", title: `${c.unmapped} missing recipe${c.unmapped === 1 ? "" : "s"}`, detail: "Add recipes to improve tracking", to: "/recipes?tab=todo" });
+  if (c?.opening && c.missing_sales_days.length) attention.push({ tone: "warn", title: `Sales missing for ${c.missing_sales_days.length} day${c.missing_sales_days.length === 1 ? "" : "s"}`, detail: dayRanges(c.missing_sales_days), to: "/sales" });
+  if (issues.data?.length) attention.push({ tone: "warn", title: `${issues.data.length} import issue${issues.data.length === 1 ? "" : "s"}`, detail: "Review what didn’t match", to: "/imports" });
+  if (future.length) attention.push({ tone: "warn", title: `${future.length} count${future.length === 1 ? "" : "s"} dated in the future`, detail: "Check the count date", to: "/counts" });
+  if (draft) attention.push({ tone: "info", title: "Count in progress", detail: `Draft for ${d(draft.counted_at)}: resume`, to: `/counts/${draft.id}` });
+  else if (overdue) attention.push({ tone: "warn", title: "Count overdue", detail: `Last count ${sinceLast} days ago`, to: "/counts" });
+  else if (remind && untilCount != null && untilCount <= 1) attention.push({ tone: "info", title: `Count due ${countWhen}`, detail: "Schedule or start the count", to: "/counts" });
+
+  const strip: ReactNode[] = [];
+  if (draft) strip.push(<Link key="count" to={`/counts/${draft.id}`}><Icon name="calendar" className="text-accent" /><strong>Count in progress</strong><span className="flex-1 text-ink-2">Draft for {d(draft.counted_at)}. Finish and post it to close the period.</span></Link>);
+  else if (overdue) strip.push(<Link key="count" to="/counts"><Icon name="calendar" className="text-accent" /><strong>Count overdue</strong><span className="flex-1 text-ink-2">The last beverage count was {sinceLast} days ago.</span></Link>);
+  else if (remind && countDay) strip.push(<Link key="count" to="/counts"><Icon name="calendar" className="text-accent" /><strong>Count due</strong><span className="flex-1 text-ink-2">Next beverage count is due {countWhen} ({short(countDay)}).</span></Link>);
+  if (c?.unmapped) strip.push(<Link key="recipes" to="/recipes?tab=todo"><Icon name="book" className="text-accent" /><strong>{c.unmapped} missing recipe{c.unmapped === 1 ? "" : "s"}</strong><span className="flex-1 text-ink-2">Add recipes to track usage and cost accurately.</span><Icon name="chevron" className="text-accent" /></Link>);
+
+  const stockLabel = (r: { on_hand: Num | null; stock_unit: string }) => r.on_hand == null ? "—" : `${n(r.on_hand, 1)} ${r.stock_unit}`;
 
   return (
-    <Page title="Overview" sub={last ? `Since the last count on ${d(last.counted_at)}` : undefined}>
-      <ThisWeek />
-      <BarPerformance />
-      <div className="stats mb-8">
-        <Stat label="Last count" value={daysSince == null ? "None yet" : daysSince === 0 ? "Today" : `${daysSince} day${daysSince === 1 ? "" : "s"} ago`}
-          sub={draft ? <Link className="underline" to={`/counts/${draft.id}`}>A draft count is open: resume</Link>
-            : future.length ? <Link className="underline" to="/counts">{future.length} count{future.length === 1 ? " is" : "s are"} dated in the future: check</Link>
-            : overdue ? "Weekly count overdue" : daysSince == null ? "Start one from the top bar" : d(last!.counted_at)}
-          tone={overdue || draft || future.length ? "warn" : undefined} />
-        <Stat label="Below par" value={items.data ? <>{below.length} <span className="text-base text-muted font-normal">of {items.data.length}</span></> : "…"}
-          sub={below.length ? summarise(below.map((i) => i.category ?? "Other")) : withPar.length ? "Everything at or above par" : "Set par levels under Stock items"}
-          tone={below.length ? "warn" : undefined} />
-        <Stat label="Received this week" value={moves.data ? (costed.length ? `$${n(spend, 0)}` : String(recentDeliveries.length)) : "…"}
-          sub={recentDeliveries.length ? `${recentDeliveries.length} deliveries, ${invoices} reference${invoices === 1 ? "" : "s"}${costed.length && costed.length < recentDeliveries.length ? `, ${recentDeliveries.length - costed.length} without cost` : ""}` : "No deliveries in the last 7 days"} />
-        <Stat label="Needs review" value={issues.data ? String(issues.data.length) : "…"}
-          sub={issues.data?.length ? <Link className="underline" to="/imports">From imports: review</Link> : "Nothing waiting"} tone={issues.data?.length ? "warn" : undefined} />
+    <div className="px-4 sm:px-7 py-5 sm:py-6 max-w-[1320px] mx-auto">
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 mb-4">
+        <div className="min-w-0">
+          <div className="eyebrow">Owner’s overview</div>
+          <h1 className="text-[2rem] font-bold leading-tight max-w-none">Overview</h1>
+        </div>
+        <label className="ctl-chip">
+          <Icon name="calendar" size={16} className="text-muted" />
+          <span className="sr-only">Period</span>
+          <select className="bg-transparent outline-none pr-1" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            {RANGES.map((k) => <option key={k} value={k} className="bg-paper-2">{k === days ? `${short(from)} – ${short(today)}` : `Last ${k} days`}</option>)}
+          </select>
+        </label>
+      </header>
+
+      {strip.length > 0 && <div className="alert-strip mb-4">{strip}</div>}
+
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4 mb-3">
+        <Kpi icon="glass" label="Beverage sales" value={!seeRep ? "—" : net == null ? "…" : money(net)}
+          delta={salesChange != null ? { text: `${signed(salesChange)}%`, good: salesChange >= 0 } : undefined}
+          note={salesChange != null ? `vs. prior ${days} days` : seeRep && net === 0 ? <Link className="underline" to="/sales">Import Swype sales</Link> : seeRep ? "" : "Needs Reports access"} />
+        <Kpi icon="coins" label="Beverage cost" value={!seeVar ? "—" : !perf.data ? "…" : bc?.pct != null ? `${n(bc.pct, 1)}%` : "—"}
+          delta={pp != null ? { text: `${signed(pp)} pp`, good: pp <= 0 } : undefined}
+          note={pp != null ? "vs. prior count" : !seeVar ? "Needs Stock vs sales access" : bc ? "No drink sales between counts" : perf.data ? "Needs two posted counts" : ""} />
+        <Kpi icon="warn" label="Unexplained usage" value={!seeVar ? "—" : !perf.data ? "…" : unexplained != null ? money(unexplained) : "—"}
+          tone={unexplained != null && unexplained < 0 ? "bad" : undefined}
+          note={unexplainedPct != null ? `≈ ${n(unexplainedPct, 1)}% of sales · last count period` : unexplained != null ? "Last count period" : ""} to="/variance" />
+        <Kpi icon="box" label="Stock risks" value={!seeRep ? "—" : !reorder.data ? "…" : String(risks.length)}
+          note={!reorder.data ? "" : risks.length ? <Link to="/reports/reorder" className="inline-flex items-center gap-1 hover:text-accent">Items need attention <Icon name="chevron" size={12} className="text-accent" /></Link> : reorder.data.counted ? "Nothing running low" : "Needs a posted count"} />
       </div>
 
-      <div className="grid gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <section className="min-w-0">
-          <div className="flex items-baseline justify-between mb-2 gap-3">
-            <h2 className="font-semibold">Stock vs par</h2>
-            <span className="text-xs text-muted">packs at last count · lowest first</span>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] mb-3">
+        <RevenueCard report={sales.data} allowed={seeRep} change={salesChange} days={days} />
+        <section className="dcard">
+          <div className="dcard-head"><h2 className="dcard-title">Needs attention ({attention.length})</h2></div>
+          {attention.length === 0 ? <p className="text-sm text-muted py-6 text-center">All clear.</p> : (
+            <ul>{attention.slice(0, 7).map((a) => (
+              <li key={a.title}><Link to={a.to} className="attn">
+                <Icon name={a.tone === "info" ? "info" : "warn"} size={16} className={a.tone === "bad" ? "text-danger" : a.tone === "warn" ? "text-accent" : "text-info"} />
+                <span className="font-semibold min-w-0 flex-1 truncate">{a.title}</span>
+                <span className="text-xs text-muted text-right shrink-0 max-w-[45%] truncate">{a.detail}</span>
+                <Icon name="chevron" size={14} className="attn-go text-faint" />
+              </Link></li>))}
+            </ul>)}
+        </section>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] mb-3">
+        <section className="dcard">
+          <div className="dcard-head">
+            <h2 className="dcard-title">Biggest usage differences</h2>
+            {variance.data && <Link to="/variance" className="text-xs text-muted hover:text-accent">{d(variance.data.opening.counted_at)} – {d(variance.data.closing.counted_at)}</Link>}
           </div>
-          {items.data && withPar.length === 0 && <Empty>No items with a par level and a count yet.</Empty>}
-          {withPar.length > 0 && (
-            <div className="table-box">
-              <table className="grid">
-                <thead><tr><th>Item</th><th className="w-[42%]">Level</th><th className="r">On hand</th><th className="r">Par</th></tr></thead>
-                <tbody>{withPar.slice(0, 10).map((i) => {
-                  const pct = Math.min(100, Math.round((i.on / i.par) * 100));
-                  return (
-                    <tr key={i.id}>
-                      <td>{i.name} <span className="text-xs text-faint">{i.category}</span></td>
-                      <td>
-                        <div className="h-1.5 bg-line rounded-chip overflow-hidden" role="img" aria-label={`${pct}% of par`}>
-                          <div className={`h-full ${i.on < i.par ? "bg-accent" : "bg-ok"}`} style={{ width: `${pct}%` }} />
-                        </div>
-                      </td>
-                      <td className="r mono">{i.on.toFixed(1)}</td>
-                      <td className="r mono text-muted">{n(i.par, 1)}</td>
-                    </tr>
-                  );
-                })}</tbody>
-              </table>
-              {withPar.length > 10 && <Link className="underline text-sm text-muted mt-3 inline-block" to="/items">All {withPar.length} items with a par</Link>}
-            </div>
-          )}
+          {!seeVar ? <p className="text-sm text-muted">Needs Stock vs sales access.</p>
+            : variance.error ? <p className="text-sm text-muted">Needs two posted counts, that period’s Swype sales and recipes.</p>
+            : !variance.data ? <p className="text-sm text-muted">…</p>
+            : vrows.length === 0 ? <p className="text-sm text-muted">No usage to compare yet.</p> : (
+            <div className="overflow-x-auto"><table className="dt">
+              <thead><tr><th>Item</th><th className="r">Expected usage</th><th className="r">Actual usage</th><th className="r">Difference</th><th className="r">Variance</th></tr></thead>
+              <tbody>{vrows.slice(0, 5).map((r) => {
+                const pct = r.variance_pct == null ? null : Number(r.variance_pct);
+                return (
+                  <tr key={r.item_id}>
+                    <td className="font-medium">{r.name}</td>
+                    <td className="r">{n(r.should_use, 1)} {r.stock_unit}</td>
+                    <td className="r">{n(r.actual, 1)} {r.stock_unit}</td>
+                    <td className="r">{signed(Number(r.variance))} {r.stock_unit}</td>
+                    <td className="r">{pct == null ? <span className="tag tag-bad">no sales</span> : <span className={`tag ${pct > 0 ? "tag-bad" : "tag-good"}`}>{signed(pct)}%</span>}</td>
+                  </tr>);
+              })}</tbody>
+            </table></div>)}
         </section>
 
-        <aside className="min-w-0 flex flex-col gap-8">
-          <VarianceCard />
-          <section>
-            <h2 className="font-semibold mb-2">Activity</h2>
-            {/* a feed this login may not read counts as empty */}
-            <Activity counts={counts.error ? [] : counts.data} moves={moves.error ? [] : moves.data} batches={batches.error ? [] : batches.data} />
-          </section>
-        </aside>
+        <section className="dcard">
+          {seeRep ? (<>
+            <div className="dcard-head"><h2 className="dcard-title">Running low ({risks.length})</h2><Link to="/reports/reorder" className="text-xs text-muted hover:text-accent">Purchasing</Link></div>
+            {!reorder.data ? <p className="text-sm text-muted">…</p> : risks.length === 0
+              ? <p className="text-sm text-muted">{reorder.data.counted ? "Nothing running low." : "Needs a posted count."}</p> : (
+              <div className="overflow-x-auto"><table className="dt">
+                <thead><tr><th>Item</th><th className="r">On hand</th><th className="r">Est. days left</th><th className="r">Reorder suggestion</th></tr></thead>
+                <tbody>{risks.slice(0, 5).map((r) => {
+                  const dl = r.days_left == null ? null : Number(r.days_left);
+                  return (
+                    <tr key={r.key}>
+                      <td className="font-medium">{r.name}</td>
+                      <td className="r">{stockLabel(r)}</td>
+                      <td className="r">{dl == null ? "—" : <span className={`tag ${dl < 4 ? "tag-bad" : "tag-warn"}`}>≈ {n(dl, 0)} day{Math.round(dl) === 1 ? "" : "s"}</span>}</td>
+                      <td className="r">{r.packs ? <Link to="/reports/reorder" className="inline-flex items-center gap-1 text-accent font-semibold"><Icon name="cart" size={14} />Order {r.packs} {r.pack_name ?? (r.packs === 1 ? "pack" : "packs")}</Link> : "—"}</td>
+                    </tr>);
+                })}</tbody>
+              </table></div>)}
+          </>) : <BelowPar items={items.data} />}
+        </section>
       </div>
-    </Page>
-  );
-}
 
-function summarise(cats: string[]) {
-  const m = new Map<string, number>();
-  for (const c of cats) m.set(c, (m.get(c) ?? 0) + 1);
-  return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c, k]) => `${k} ${c.toLowerCase()}`).join(", ");
-}
-
-type Event = { at: number; title: string; sub: string; to: string };
-
-function Activity({ counts, moves, batches }: { counts?: CountSession[]; moves?: Movement[]; batches?: Batch[] }) {
-  if (!counts || !moves || !batches) return <div className="text-muted">…</div>;
-  const ev: Event[] = [];
-  for (const c of counts.filter((c) => c.status === "posted").slice(0, 5))
-    ev.push({ at: new Date(c.counted_at).getTime(), title: "Count posted", sub: `${d(c.counted_at)} · ${c.line_count} items`, to: `/counts/${c.id}` });
-  // movements arrive one per item line; show one event per day and kind
-  const byDay = new Map<string, Movement[]>();
-  for (const m of moves) { const k = `${m.occurred_at.slice(0, 10)}|${m.kind}`; if (!byDay.has(k)) byDay.set(k, []); byDay.get(k)!.push(m); }
-  for (const [k, ms] of [...byDay.entries()].slice(0, 5)) {
-    const kind = k.split("|")[1].replace("_", " ");
-    ev.push({ at: new Date(ms[0].occurred_at).getTime(), title: kind.charAt(0).toUpperCase() + kind.slice(1), sub: `${d(ms[0].occurred_at)} · ${ms.length} line${ms.length === 1 ? "" : "s"}`, to: ms[0].delivery_id ? `/deliveries/${ms[0].delivery_id}` : "/deliveries" });
-  }
-  for (const b of batches.filter((b) => b.status === "ok").slice(0, 3))
-    ev.push({ at: new Date(b.imported_at).getTime(), title: `Imported ${datasetName(b.dataset)}`, sub: `${d(b.imported_at)} · ${b.rows_inserted} new rows`, to: b.dataset === "item_sales" ? "/sales" : "/imports" });
-  ev.sort((a, b) => b.at - a.at);
-  if (!ev.length) return <div className="text-muted">Nothing yet.</div>;
-  return (
-    <ul className="border-t border-line-strong">
-      {ev.slice(0, 6).map((e, i) => (
-        <li key={i} className="border-b border-line">
-          <Link to={e.to} className="block py-2 group">
-            <span className="group-hover:text-accent">{e.title}</span><span className="block text-xs text-muted">{e.sub}</span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Stat({ label, value, sub, tone }: { label: string; value: React.ReactNode; sub: React.ReactNode; tone?: "warn" }) {
-  return (
-    <div>
-      <div className="label">{label}</div>
-      <div className="text-3xl font-semibold num mt-1">{value}</div>
-      <div className={`text-sm mt-0.5 ${tone === "warn" ? "text-accent" : "text-muted"}`}>{sub}</div>
+      {seeRep && <TopDrinks report={pour.data} />}
     </div>
   );
 }
 
-function VarianceCard() {
-  const r = useAsync(() => api.get<VarianceReport>("/api/variance"));
-  // items and sets of alternatives ("Box A, Box B and Box C") alike
-  const off = [...(r.data?.rows ?? []).map((x) => ({ ...x, key: x.item_id })), ...(r.data?.pools ?? []).map((x) => ({ ...x, key: x.id }))]
-    .filter((x) => x.status === "off").sort((a, b) => Math.abs(Number(b.variance_pct ?? 0)) - Math.abs(Number(a.variance_pct ?? 0)));
+type Attn = { tone: "bad" | "warn" | "info"; title: string; detail: string; to: string };
+
+function Kpi({ icon, label, value, delta, note, tone, to }: { icon: IconName; label: string; value: ReactNode; delta?: { text: string; good: boolean }; note?: ReactNode; tone?: "bad"; to?: string }) {
+  const body = (
+    <div className="dkpi">
+      <Icon name={icon} size={22} className="text-accent mt-0.5" />
+      <div className="min-w-0">
+        <div className="dkpi-label">{label}</div>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <div className={`dkpi-value ${tone === "bad" ? "text-danger" : ""}`}>{value}</div>
+          {(delta || note) && <div className="dkpi-note leading-tight">
+            {delta && <div className={`flex items-center gap-1 text-sm ${delta.good ? "delta-up" : "delta-down"}`}><Icon name={delta.good ? "up" : "down"} size={12} strokeWidth={2.5} />{delta.text}</div>}
+            {note && <div>{note}</div>}
+          </div>}
+        </div>
+      </div>
+    </div>);
+  return to ? <Link to={to} className="dcard block hover:border-line-strong">{body}</Link> : <div className="dcard">{body}</div>;
+}
+
+function RevenueCard({ report, allowed, change, days }: { report?: SalesReport | null; allowed: boolean; change: number | null; days: number }) {
+  // one bar per sales period (a day for daily Swype imports)
+  const bars = (report?.periods ?? []).map((p) => ({ ...p, net: Number(p.net) }));
+  const max = Math.max(1, ...bars.map((b) => b.net));
+  const step = niceStep(max / 4);
+  const top = step * 4;
   return (
-    <section className="card p-4">
-      <div className="flex items-baseline justify-between mb-1"><h2 className="font-semibold">Stock vs sales</h2><Link className="text-sm underline" to="/variance">Open</Link></div>
-      {r.error && <p className="text-muted">Needs two posted counts, that week’s Swype sales and recipes.</p>}
-      {r.data && (<>
-        <p className="text-muted text-sm mb-2">{d(r.data.opening.counted_at)} to {d(r.data.closing.counted_at)}: {off.length} off by {n(r.data.threshold_pct, 0)}% or more</p>
-        <ul className="text-sm space-y-0.5">{off.slice(0, 5).map((x) => (
-          <li key={x.key} className="flex justify-between gap-2"><span>{x.name}</span><span className="num text-danger">{x.variance_pct == null ? "no sales" : `${Number(x.variance_pct) > 0 ? "+" : ""}${n(x.variance_pct, 1)}%`}</span></li>))}</ul>
-      </>)}
+    <section className="dcard">
+      <div className="dcard-head flex-wrap">
+        <h2 className="dcard-title">Daily beverage revenue</h2>
+        {report && <div className="text-sm"><span className="font-bold text-base">{money(report.summary.net)}</span> <span className="text-muted">total</span>
+          {change != null && <span className={`ml-3 ${change >= 0 ? "delta-up" : "delta-down"}`}>{change >= 0 ? "▲" : "▼"} {signed(change)}%</span>}
+          {change != null && <span className="text-muted ml-1">vs. prior {days} days</span>}</div>}
+      </div>
+      {!allowed ? <p className="text-sm text-muted">Needs Reports access.</p>
+        : !report ? <p className="text-sm text-muted h-[220px]">…</p>
+        : bars.length === 0 ? <p className="text-sm text-muted py-16 text-center">No Swype sales in this period. <Link className="underline" to="/sales">Import sales</Link></p> : (
+        <div className="flex gap-2">
+          <div className="flex flex-col justify-between text-[11px] text-muted text-right h-[190px] -mt-1.5 pb-0 shrink-0">
+            {[4, 3, 2, 1, 0].map((k) => <span key={k} className="leading-none">${n(step * k, 0)}</span>)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="bars bars-grid border-b border-line-strong">
+              {bars.map((b) => (
+                <div key={b.from} className="bar-col" title={`${b.from === b.to ? d(`${b.from}T12:00`) : `${b.from} – ${b.to}`}: ${money(b.net, 2)}`}>
+                  {bars.length <= 14 && <span className="bar-val">{money(b.net)}</span>}
+                  <div className="bar" style={{ height: `${(b.net / top) * 100}%` }} />
+                </div>))}
+            </div>
+            <div className="grid grid-flow-col auto-cols-fr gap-2 mt-1.5">
+              {bars.map((b, i) => {
+                const t = atNoon(b.to);
+                const show = bars.length <= 14 || i % Math.ceil(bars.length / 10) === 0;
+                return <div key={b.from} className="bar-x">{show && <>{short(t)}<br />{bars.length <= 14 && t.toLocaleDateString("en-CA", { weekday: "short" })}</>}</div>;
+              })}
+            </div>
+          </div>
+        </div>)}
     </section>
   );
 }
 
-type Step = { state: "done" | "todo" | "wait"; title: string; sub?: string; to?: string; action?: string };
+function niceStep(x: number) {
+  const p = 10 ** Math.floor(Math.log10(Math.max(x, 1)));
+  return ([1, 2, 2.5, 5, 10].find((m) => m * p >= x) ?? 10) * p;
+}
 
-/** The weekly loop in order: what the next variance report still needs. */
-function ThisWeek() {
-  const r = useAsync(() => api.get<CurrentPeriod>("/api/variance/current"));
-  const c = r.data;
-  if (!c) return null;
-  const miss = c.missing_sales_days;
-  const steps: Step[] = [
-    c.opening
-      ? { state: "done", title: `Opening count ${d(c.opening.counted_at)}`, to: `/counts/${c.opening.id}` }
-      : { state: "todo", title: "No posted count yet", sub: "Every period starts with a count.", to: "/counts", action: "Count" },
-    { state: c.deliveries ? "done" : "wait", title: c.deliveries ? `${c.deliveries} deliver${c.deliveries === 1 ? "y" : "ies"} recorded` : "No deliveries recorded",
-      sub: c.deliveries ? undefined : "If stock arrived, enter it or items will look over.", to: "/deliveries", action: "Record" },
-    !c.opening || c.days === 0
-      ? { state: "wait", title: "Swype sales", sub: "Nothing to import yet." }
-      : miss.length
-        ? { state: "todo", title: `Sales missing for ${miss.length} of ${c.days} days`, sub: dayRanges(miss), to: "/sales", action: "Import" }
-        : { state: "done", title: `Sales imported for all ${c.days} days` },
-    c.unmapped
-      ? { state: "todo", title: `${c.unmapped} sold item${c.unmapped === 1 ? " has" : "s have"} no recipe`, sub: "Their pours don’t count toward usage.", to: "/recipes?tab=todo", action: "Add" }
-      : { state: c.opening ? "done" : "wait", title: "Every sold item has a recipe" },
-    c.draft
-      ? { state: "todo", title: "Closing count in progress", sub: `Draft for ${d(c.draft.counted_at)}`, to: `/counts/${c.draft.id}`, action: "Resume" }
-      : { state: "wait", title: "Closing count", sub: "Count again at the end of the week (Start count, top right)." },
-  ];
-  const mark = { done: "✓", todo: "!", wait: "○" };
-  const tone = { done: "text-ok", todo: "text-accent", wait: "text-faint" };
+function TopDrinks({ report }: { report?: PourReport | null }) {
+  const rows = report ? [...report.rows, ...report.no_recipe].sort((a, b) => Number(b.revenue) - Number(a.revenue)).slice(0, 5) : [];
   return (
-    <section className="mb-8" aria-labelledby="this-week">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-        <h2 id="this-week" className="font-semibold">This week</h2>
-        {c.last_variance
-          ? <Link className="text-sm underline" to="/variance">Last stock vs sales: {d(c.last_variance.opening_at)} to {d(c.last_variance.closing_at)}</Link>
-          : <span className="text-sm text-muted">Stock vs sales appears after two posted counts.</span>}
-      </div>
-      <ol className="loop">
-        {steps.map((s) => (
-          <li key={s.title} data-state={s.state} className="text-sm">
-            <div className={`flex gap-2 font-medium ${s.state === "wait" ? "text-muted" : ""}`}>
-              <span aria-hidden className={`shrink-0 w-4 font-semibold ${tone[s.state]}`}>{mark[s.state]}</span>
-              <span className="min-w-0">{s.title}</span>
-            </div>
-            <div className="pl-6">
-              {s.sub && <div className="text-xs text-muted mt-0.5 break-words">{s.sub}</div>}
-              {s.to && s.action && <Link className="underline text-accent mt-1 inline-block" to={s.to}>{s.action}</Link>}
-              {s.to && !s.action && <Link className="underline text-muted mt-1 inline-block" to={s.to}>Open</Link>}
-            </div>
-          </li>))}
-      </ol>
+    <section className="dcard">
+      <div className="dcard-head"><h2 className="dcard-title">Top drinks <span className="text-muted font-normal text-sm">(by beverage sales)</span></h2>
+        <Link to="/reports/pour-cost" className="text-xs text-muted hover:text-accent">Pour cost</Link></div>
+      {!report ? <p className="text-sm text-muted">…</p> : rows.length === 0 ? <p className="text-sm text-muted">No drink sales in this period.</p> : (
+        <div className="overflow-x-auto"><table className="dt">
+          <thead><tr><th>Rank</th><th>Drink</th><th>Category</th><th className="r">Units sold</th><th className="r">Beverage sales</th><th className="r">Beverage cost</th><th className="r">Cost %</th></tr></thead>
+          <tbody>{rows.map((r, i) => {
+            const cost = r.theoretical_cost == null ? null : Number(r.theoretical_cost);
+            const pct = cost != null && Number(r.revenue) ? cost / Number(r.revenue) * 100 : null;
+            return (
+              <tr key={r.code}>
+                <td><span className="rank">{i + 1}</span></td>
+                <td><span className="inline-flex items-center gap-2 font-medium"><Icon name={drinkIcon(r.category)} size={16} className="text-ink-2" />{r.name}</span></td>
+                <td className="text-ink-2">{r.category ?? "—"}</td>
+                <td className="r">{n(r.sold, 0)}</td>
+                <td className="r">{money(r.revenue)}</td>
+                <td className="r">{cost == null ? <span className="text-faint">no recipe</span> : money(cost)}</td>
+                <td className="r">{pct == null ? "—" : `${n(pct, 1)}%`}</td>
+              </tr>);
+          })}</tbody>
+        </table></div>)}
     </section>
   );
+}
+
+function drinkIcon(cat: string | null): IconName {
+  const c = (cat ?? "").toLowerCase();
+  if (/coffee|espresso|latte|tea|hot/.test(c)) return "coffee";
+  if (/beer|lager|ale|draught|draft|cider/.test(c)) return "beer";
+  if (/wine|prosecco|champagne|sparkling/.test(c)) return "wine";
+  if (/spirit|whisk|vodka|gin|rum|tequila|shot/.test(c)) return "bottle";
+  return "glass";
+}
+
+/** Without Reports access: the lowest stock against par from the last count. */
+function BelowPar({ items }: { items?: Item[] }) {
+  const rows = (items ?? []).filter((i) => i.par_level && Number(i.par_level) > 0 && i.last_counted_packs != null)
+    .map((i) => ({ ...i, on: Number(i.last_counted_packs), par: Number(i.par_level) })).filter((i) => i.on < i.par)
+    .sort((a, b) => a.on / a.par - b.on / b.par);
+  return (<>
+    <div className="dcard-head"><h2 className="dcard-title">Below par ({rows.length})</h2><Link to="/items" className="text-xs text-muted hover:text-accent">Stock items</Link></div>
+    {!items ? <p className="text-sm text-muted">…</p> : rows.length === 0 ? <p className="text-sm text-muted">Everything at or above par.</p> : (
+      <table className="dt">
+        <thead><tr><th>Item</th><th className="r">On hand</th><th className="r">Par</th></tr></thead>
+        <tbody>{rows.slice(0, 5).map((i) => (
+          <tr key={i.id}><td className="font-medium">{i.name}</td><td className="r"><span className="tag tag-warn">{n(i.on, 1)}</span></td><td className="r text-muted">{n(i.par, 1)}</td></tr>))}</tbody>
+      </table>)}
+  </>);
 }
