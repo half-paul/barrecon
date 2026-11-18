@@ -117,3 +117,38 @@ def test_audit_viewer_and_filters(client):
     assert r["total"] >= 2 and all(e["action"] == "login" for e in r["events"])
     assert a.get("/api/audit?date_from=2000-01-01&date_to=2000-01-02").json()["total"] == 0
     assert a.get("/api/users").status_code == 403
+
+
+def test_delete_user_keeps_audit_log(client, db):
+    u = _make(client, "gone", {"counts": "edit"}, email="gone@bar.example")
+    gone = _login("gone", "pass-word-1")
+    assert gone.post("/api/counts", json={"counted_at": "2026-11-01T10:00:00Z"}).status_code == 201
+    before = client.get(f"/api/audit?user_id={u['id']}").json()["total"]
+
+    assert client.delete(f"/api/users/{u['id']}").status_code == 204
+    # gone from the user list, can't log in, the open session is dead
+    assert u["id"] not in [x["id"] for x in client.get("/api/users").json()]
+    assert gone.get("/api/auth/me").json()["user"] is None
+    assert TestClient(app).post("/api/auth/login", json={"username": "gone", "password": "pass-word-1"}).status_code == 401
+    row = db.get(User, u["id"])
+    db.refresh(row)
+    assert row.deleted_at and not row.is_active and row.email is None and row.username != "gone"
+    # every entry stays, still under their name, and the chain still verifies
+    ev = client.get(f"/api/audit?user_id={u['id']}").json()
+    assert ev["total"] >= before and all(e["username"] == "gone" for e in ev["events"] if e["action"] != "login_failed")
+    assert client.get("/api/audit/verify").json()["ok"]
+    people = {p["id"]: p for p in client.get("/api/audit/users").json()}
+    assert people[u["id"]]["deleted"] and people[u["id"]]["display_name"] == "Gone"
+    # the username and email can be used again; the deleted login can't be touched
+    _make(client, "gone", email="gone@bar.example")
+    assert client.patch(f"/api/users/{u['id']}", json={"is_active": True}).status_code == 404
+    assert client.delete(f"/api/users/{u['id']}").status_code == 404
+
+
+def test_cannot_delete_self_or_last_admin(client, db):
+    me = client.get("/api/auth/me").json()["user"]
+    assert client.delete(f"/api/users/{me['id']}").status_code == 409
+    other = _make(client, "boss", is_admin=True)
+    boss = _login("boss", "pass-word-1")
+    assert boss.delete(f"/api/users/{me['id']}").status_code == 204
+    assert boss.delete(f"/api/users/{other['id']}").status_code == 409

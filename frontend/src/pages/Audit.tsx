@@ -4,7 +4,7 @@ import { api, type Area, type AuditChange, type AuditEvent, dt } from "../lib/ap
 import { useMe } from "../lib/auth";
 import { Button, Empty, Field, inputCls, Loading, Nil, Notice, Page, useAsync } from "../lib/ui";
 
-type Person = { id: string; username: string; display_name: string; is_active: boolean };
+type Person = { id: string; username: string; display_name: string; is_active: boolean; deleted?: boolean };
 type Place = { id: string; name: string; businesses: { id: string; name: string }[] };
 type Row = AuditEvent & { tenant?: string | null; business?: string | null };
 const PAGE = 100;
@@ -67,7 +67,7 @@ export default function Audit({ platform = false }: { platform?: boolean }) {
           </select></Field>
         </> : <Field label="Person"><select className={inputCls} value={f.user} onChange={(e) => set("user", e.target.value)}>
           <option value="">Everyone</option>
-          {people.data?.map((p) => <option key={p.id} value={p.id}>{p.display_name}{p.is_active ? "" : " (off)"}</option>)}
+          {people.data?.map((p) => <option key={p.id} value={p.id}>{p.display_name}{p.deleted ? " (deleted)" : p.is_active ? "" : " (off)"}</option>)}
         </select></Field>}
         <Field label="Area"><select className={inputCls} value={f.area} onChange={(e) => set("area", e.target.value)}>
           <option value="">All</option>

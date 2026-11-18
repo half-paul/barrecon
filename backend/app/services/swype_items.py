@@ -22,6 +22,7 @@ import csv
 import io
 import re
 from datetime import date, datetime, time, timezone
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -30,11 +31,13 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import ImportBatch, InventoryItem, SwypeItemSales, SwypeMenuItem
 from . import inventory as inv
+from . import settings_svc
 from .xlsx_io import sha256
 
 DATASET = "swype_items"
 SUFFIX_RE = re.compile(r"\s+(?:SNG|DBL|BTL|Bottle|\d+\s*oz|(?:Single|Double)(?:\s+(?:Premium|Delux|Deluxe))?)\s*$", re.I)
-CSV_CODE, CSV_NAME = "Item Code", "Item Desc1"
+CSV_CODE, CSV_NAME, CSV_PRICE = "Item Code", "Item Desc1", "Default Price"
+CENT = Decimal("0.01")
 
 
 class CatalogueError(ValueError):
@@ -70,10 +73,15 @@ def sync(db: Session, rows: list[dict], *, source: str) -> dict:
         seen.add(code)
         m = known.get(code)
         if m is None:
-            db.add(SwypeMenuItem(code=code, name=name, category=cat, source=source))
+            m = SwypeMenuItem(code=code, name=name, category=cat, source=source)
+            if "catalogue_price" in r:
+                m.catalogue_price = r["catalogue_price"]
+            db.add(m)
             out["new"] += 1
             out["new_items"].append(name)
             continue
+        if "catalogue_price" in r:
+            m.catalogue_price = r["catalogue_price"]
         if r.get("sold") and not m.is_active:
             m.is_active = True
             out["reactivated"] += 1
@@ -126,10 +134,58 @@ def custom_names(db: Session) -> dict[str, str]:
                            .where(SwypeMenuItem.custom_name.is_not(None))).all())
 
 
-def item_out(m: SwypeMenuItem, sold: dict | None = None) -> dict:
+def refresh_prices(db: Session) -> int:
+    """Set each item's price to Amt / Qty from its latest sales period with paid units (Qty excludes combo,
+    promo and free units). An item with no such period loses its price. Flushes, does not commit. Returns how
+    many prices changed."""
+    latest: dict[str, tuple[Decimal, date]] = {}
+    for code, amount, qty, period_to in db.execute(
+            select(SwypeItemSales.item_code, SwypeItemSales.amount, SwypeItemSales.qty, SwypeItemSales.period_to)
+            .where(SwypeItemSales.qty > 0).order_by(SwypeItemSales.period_to)):
+        latest[code] = ((Decimal(amount) / Decimal(qty)).quantize(CENT, ROUND_HALF_UP), period_to)  # latest wins
+    n = 0
+    for m in db.scalars(select(SwypeMenuItem)):
+        price, period_to = latest.get(m.code, (None, None))
+        old = Decimal(m.price) if m.price is not None else None
+        if old != price or m.price_period_to != period_to:
+            n += old != price
+            m.price, m.price_period_to = price, period_to
+    db.flush()
+    return n
+
+
+def price_change_pct(m: SwypeMenuItem) -> Decimal | None:
+    """How far the sales price is from Swype's catalogue price, in %. None when either is missing or the
+    catalogue price is 0 (open-price items)."""
+    if m.price is None or not m.catalogue_price:
+        return None
+    cat = Decimal(m.catalogue_price)
+    return ((Decimal(m.price) - cat) / cat * 100).quantize(Decimal("0.1"), ROUND_HALF_UP)
+
+
+def price_alerts(db: Session) -> dict:
+    """Items whose sales price differs from the catalogue price by at least the price alert setting."""
+    threshold = Decimal(settings_svc.get(db, "price_alert_pct"))
+    alerts = []
+    for m in db.scalars(select(SwypeMenuItem).order_by(SwypeMenuItem.category, SwypeMenuItem.name)):
+        pct = price_change_pct(m)
+        if pct is not None and abs(pct) >= threshold:
+            alerts.append({"code": m.code, "name": display_name(m), "price": float(m.price),
+                           "catalogue_price": float(m.catalogue_price), "change_pct": float(pct),
+                           "price_period_to": m.price_period_to.isoformat() if m.price_period_to else None})
+    return {"threshold_pct": float(threshold), "price_alerts": alerts}
+
+
+def item_out(m: SwypeMenuItem, sold: dict | None = None, threshold: Decimal | None = None) -> dict:
+    pct = price_change_pct(m)
     return {"code": m.code, "name": display_name(m), "swype_name": m.name, "renamed": m.custom_name is not None,
             "category": m.category, "is_active": m.is_active, "source": m.source,
-            "sold": float(sold["sold"]) if sold else 0.0, "last_sold": sold["last_sold"] if sold else None}
+            "sold": float(sold["sold"]) if sold else 0.0, "last_sold": sold["last_sold"] if sold else None,
+            "price": float(m.price) if m.price is not None else None,
+            "price_period_to": m.price_period_to.isoformat() if m.price_period_to else None,
+            "catalogue_price": float(m.catalogue_price) if m.catalogue_price is not None else None,
+            "price_change_pct": float(pct) if pct is not None else None,
+            "price_alert": pct is not None and threshold is not None and abs(pct) >= threshold}
 
 
 def update(db: Session, code: str, *, name: str | None = None, is_active: bool | None = None) -> SwypeMenuItem:
@@ -161,6 +217,7 @@ def sync_from_sales(db: Session) -> dict:
                                              SwypeItemSales.category).order_by(SwypeItemSales.period_from)):
         rows[code] = {"code": code, "name": name, "category": cat}  # latest name wins
     r = sync(db, list(rows.values()), source="sales")
+    r["prices_changed"] = refresh_prices(db)
     db.commit()
     return r
 
@@ -197,6 +254,7 @@ def parse_csv(data: bytes) -> list[dict]:
     cols = [c.strip() for c in (reader.fieldnames or [])]
     if CSV_CODE not in cols or CSV_NAME not in cols:
         raise CatalogueError(f"not a Swype Export Items file: needs '{CSV_CODE}' and '{CSV_NAME}' columns (found: {cols[:6]})")
+    has_price = CSV_PRICE in cols  # older exports without it leave catalogue prices alone
     rows, seen = [], set()
     for n, r in enumerate(reader, start=2):
         r = {(k or "").strip(): (v or "").strip() for k, v in r.items()}
@@ -208,7 +266,14 @@ def parse_csv(data: bytes) -> list[dict]:
         if code in seen:
             raise CatalogueError(f"row {n}: item code {code} is listed twice")
         seen.add(code)
-        rows.append({"code": code, "name": name, "category": None})
+        row = {"code": code, "name": name, "category": None}
+        if has_price:
+            raw = r[CSV_PRICE].replace("$", "").replace(",", "")
+            try:
+                row["catalogue_price"] = Decimal(raw).quantize(CENT, ROUND_HALF_UP) if raw else None
+            except InvalidOperation:
+                raise CatalogueError(f"row {n}: '{CSV_PRICE}' is not a number: {r[CSV_PRICE]!r}") from None
+        rows.append(row)
     if not rows:
         raise CatalogueError("the file has no items")
     return rows
@@ -241,8 +306,14 @@ def apply_csv(db: Session, data: bytes, file_name: str, location_id: str) -> dic
         return reject(str(e))
     db.add(batch)
     r = sync(db, rows, source="csv")
+    alerts = price_alerts(db)
     batch.rows_received = len(rows)
     batch.rows_inserted = r["new"] + r["renamed"]
     batch.rows_duplicate = r["unchanged"]
+    if alerts["price_alerts"]:
+        batch.error_log = [{"row": 0, "status": "warning", "code": a["code"],
+                            "message": f"{a['name']}: sells at ${a['price']:.2f}, Swype catalogue says "
+                                       f"${a['catalogue_price']:.2f} ({a['change_pct']:+.1f} %)"}
+                           for a in alerts["price_alerts"]]
     db.commit()
-    return {"batch_id": batch.id, "status": "ok", "items": len(rows), **r}
+    return {"batch_id": batch.id, "status": "ok", "items": len(rows), **r, **alerts}

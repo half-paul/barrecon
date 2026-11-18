@@ -84,6 +84,13 @@ def no_stock(db: Session = Depends(get_db)):
     return {"saved": n}
 
 
+@router.get("/template.xlsx")
+def template(db: Session = Depends(get_db)):
+    return Response(recipe_import.sample_workbook(db),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="Recipes-sample.xlsx"'})
+
+
 @router.post("/import")
 async def import_recipes(file: UploadFile, db: Session = Depends(get_db)):
     try:

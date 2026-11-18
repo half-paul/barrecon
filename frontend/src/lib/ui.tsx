@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AreaScope, useReadOnly } from "./auth";
+import { GLOSSARY, type Term } from "./glossary";
 
 /** Primary and danger buttons change things, so they switch off on a view-only page. A quiet button that changes things says so with `edit`. */
 export function Button({ kind = "primary", className = "", edit, ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: "primary" | "quiet" | "danger"; edit?: boolean }) {
@@ -10,7 +11,42 @@ export function Button({ kind = "primary", className = "", edit, ...p }: React.B
   return <button className={`${base} ${k} ${className}`} {...p} disabled={p.disabled || blocked} title={blocked ? "View only" : p.title} />;
 }
 
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+/** A small "?" that explains a term. Opens on hover, focus or tap; the bubble lives in a portal so a scrolling table can’t clip it. */
+export function Help({ term, text }: { term?: Term; text?: string }) {
+  const body = text ?? (term ? GLOSSARY[term] : "");
+  const [pos, setPos] = useState<React.CSSProperties | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const id = useId();
+  const open = () => {
+    const r = btn.current?.getBoundingClientRect();
+    if (!r) return;
+    const w = Math.min(288, window.innerWidth - 32);
+    const left = Math.max(16, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 16));
+    const up = window.innerHeight - r.bottom < 140;
+    setPos({ position: "fixed", left, width: w, ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }) });
+  };
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("keydown", key); };
+  }, [pos]);
+  return (
+    <>
+      <button ref={btn} type="button" aria-label={`What is this? ${body}`} aria-describedby={pos ? id : undefined}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (pos) setPos(null); else open(); }}
+        onMouseEnter={open} onMouseLeave={() => setPos(null)} onFocus={open} onBlur={() => setPos(null)}
+        className="inline-grid place-items-center w-4 h-4 ml-1 align-text-top rounded-full border border-line-strong text-[10px] leading-none font-semibold text-muted hover:text-ink hover:border-muted normal-case">?</button>
+      {pos && createPortal(
+        <div id={id} role="tooltip" style={pos} className="z-50 rounded-control border border-line bg-surface shadow-lg px-3 py-2 text-xs font-normal text-ink text-left normal-case whitespace-normal">{body}</div>,
+        document.body)}
+    </>
+  );
+}
+
+export function Field({ label, children, hint }: { label: ReactNode; children: ReactNode; hint?: string }) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="text-muted">{label}</span>

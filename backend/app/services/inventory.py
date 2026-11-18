@@ -174,6 +174,42 @@ def redate_count(db: Session, session: CountSession, counted_at: datetime, note:
     return new
 
 
+def correct_count_line(db: Session, session: CountSession, item: InventoryItem,
+                       packs_full: Decimal | None, packs_partial: Decimal | None, note: str) -> CountSession:
+    """Fix one item on a posted count without rewriting it: a copy with that one line changed is posted at the
+    same time, which supersedes the original, so the old numbers stay as history. Both packs None takes the
+    item out of the count. The stored qty is recomputed from the item's current pack size, so this also
+    repairs a line saved while the pack size was wrong."""
+    if session.status != "posted":
+        raise InventoryError("only a posted count can be corrected this way")
+    remove = packs_full is None and packs_partial is None
+    if not remove and (Decimal(packs_full or 0) < 0 or Decimal(packs_partial or 0) < 0):
+        raise InventoryError(f"{item.sku}: negative count")
+    old = next((ln for ln in session.lines if ln.item_id == item.id), None)
+    if remove and old is None:
+        raise InventoryError(f"{item.name} is not on this count")
+    if not remove and old is not None:
+        full, partial = Decimal(packs_full or 0), Decimal(packs_partial or 0)
+        if (Decimal(old.packs_full) == full and Decimal(old.packs_partial) == partial
+                and Decimal(old.qty) == packs_to_qty(item, full, partial)):
+            raise InventoryError(f"{item.name} already has that count")
+    new = CountSession(location_id=session.location_id, counted_at=session.counted_at, source=session.source,
+                       external_ref=session.external_ref, note=note, status="draft")
+    db.add(new)
+    db.flush()
+    for ln in session.lines:
+        if ln.item_id != item.id:
+            db.add(CountLine(session_id=new.id, item_id=ln.item_id, packs_full=ln.packs_full,
+                             packs_partial=ln.packs_partial, qty=ln.qty, note=ln.note))
+    if not remove:
+        full, partial = Decimal(packs_full or 0), Decimal(packs_partial or 0)
+        db.add(CountLine(session_id=new.id, item_id=item.id, packs_full=full, packs_partial=partial,
+                         qty=packs_to_qty(item, full, partial), note=old.note if old else None))
+    post_count(db, new)  # supersedes the original: same location and counted_at
+    db.flush()
+    return new
+
+
 def count_versions(db: Session, session: CountSession) -> list[CountSession]:
     """Every version linked to this count through superseded_by (earlier ones it replaced, later ones that
     replaced it), oldest first."""

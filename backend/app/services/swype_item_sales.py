@@ -227,6 +227,8 @@ def apply(db: Session, data: bytes, file_name: str, location_id: str, *, source:
     menu = swype_items.sync(db, _item_rows(p), source="sales")
     menu["deactivated"] = swype_items.deactivate_unsold(db, location_id)
     menu["no_stock"] = recipe_match.apply_no_stock(db, location_id)
+    menu["prices_changed"] = swype_items.refresh_prices(db)
+    menu.update(swype_items.price_alerts(db))
     batch.rows_inserted = inserted + updated
     batch.rows_duplicate = unchanged
     db.commit()
@@ -273,6 +275,7 @@ def _remove(db: Session, *where) -> int:
     n = db.execute(delete(SwypeItemSales).where(*where)).rowcount
     for b in db.scalars(select(ImportBatch).where(ImportBatch.id.in_(batch_ids))):
         b.status = "removed"
+    swype_items.refresh_prices(db)  # an item's latest period may be gone
     db.commit()
     return n
 

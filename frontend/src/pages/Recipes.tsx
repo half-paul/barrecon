@@ -85,6 +85,7 @@ export default function Recipes() {
   return (
     <Page area="recipes" title="Recipes" sub="Link what Swype sells to what you count" actions={<>
       <Button kind="quiet" edit onClick={() => setAdding((v) => !v)}>{adding ? "Close" : "Add unsold item"}</Button>
+      <a className="text-sm underline" href="/api/recipes/template.xlsx">Download sample</a>
       <FileButton label="Upload Recipes.xlsx" onFile={upload} busy={busy} />
     </>}>
       {msg && <Flash kind={msg.kind} onClose={() => setMsg(null)}>{msg.text}</Flash>}
@@ -95,6 +96,7 @@ export default function Recipes() {
           <Seg value={tab} onChange={(v) => setParam("tab", v)} options={[["todo", `To link (${todo.length})`], ["recipes", `Recipes (${counts.made})`], ["direct", `1-to-1 (${counts.direct})`], ["nostock", `No stock (${counts.nostock})`], ["stock", "By stock item"]]} />
           <input className={`${inputCls} w-full sm:w-64`} placeholder="Search" aria-label="Search recipes" value={q} onChange={(e) => setParam("q", e.target.value)} />
         </div>
+        <p className="text-xs text-faint -mt-3 mb-4">“Sold” counts Swype sales from imported reports in the last 90 days.</p>
         {tab === "todo" && <ToLink rows={todoShown} foodCoffee={queue.data.no_stock} {...shared} />}
         {tab === "recipes" && <RecipeList rows={made} empty={q ? "Nothing matches." : "No recipes yet. Use Full recipe on To link to write one."} {...shared} />}
         {tab === "direct" && <RecipeList rows={direct} empty={q ? "Nothing matches." : "Nothing linked 1-to-1 yet. Approve items on To link."} {...shared} />}
@@ -153,7 +155,7 @@ function RecipeList({ rows, empty, editing, setEditing, onPhoto, items, onSaved,
               <div className="grid gap-x-4 gap-y-1.5 py-3 items-start md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_5rem_auto]">
                 <div className="flex items-start gap-2.5 min-w-0"><Thumb row={r} onPhoto={onPhoto} /><div className="min-w-0">{r.name}<div className="text-xs text-faint mono">{r.code}</div></div></div>
                 <div><Portions r={r} /></div>
-                <div className="text-sm text-muted md:text-right"><span className="num">{n(r.sold, 0)}</span> sold</div>
+                <div className="text-sm text-muted md:text-right"><span className="num">{n(r.sold, 0)}</span> sold<div className="text-xs text-faint">last 90 days</div></div>
                 <Button kind="quiet" className="justify-self-start" onClick={() => setEditing(editing === r.code ? null : r.code)}>{editing === r.code ? "Close" : "Edit"}</Button>
               </div>
               {editing === r.code && <div className="border-t border-line bg-paper"><Editor row={r} items={items} onSaved={onSaved} onError={onError} onPhoto={onPhoto} /></div>}
@@ -359,7 +361,7 @@ function ToLink({ rows, foodCoffee, editing, setEditing, items, onSaved, onError
                 {r.candidates.length > 1 && <span className="block text-xs text-muted mt-1">or {r.candidates.filter((c) => itemLabel(c) !== d.item).map((c) => <button key={c.id} className="underline mr-2" disabled={ro} onClick={() => pick(r, d, itemLabel(c))}>{c.name}</button>)}</span>}
               </>)}
           </div>
-          <div className="col-start-2 md:col-start-auto text-sm text-muted md:text-right"><span className="num">{n(r.sold, 0)}</span> sold</div>
+          <div className="col-start-2 md:col-start-auto text-sm text-muted md:text-right"><span className="num">{n(r.sold, 0)}</span> sold<div className="text-xs text-faint">last 90 days</div></div>
           <div className="col-start-2 md:col-start-auto flex gap-3 text-xs text-muted whitespace-nowrap">
             {r.clear && !d.noStock && !edit && <button className="underline hover:text-ink" disabled={ro} onClick={() => set(r.code, { changing: true })}>Change</button>}
             <button className="underline hover:text-ink" disabled={ro} onClick={() => setEditing(editing === r.code ? null : r.code)}>{editing === r.code ? "Close" : "Full recipe"}</button>

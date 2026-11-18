@@ -27,7 +27,7 @@ This script replicates that flow in Python — no dedicated server-side CSV endp
 ## Authentication
 
 - **Method**: Form-encoded POST to the Login API
-- **Credentials**: `SWYPE_EMAIL` and `SWYPE_PASSWORD` environment variables (load with `set -a; . ./.env; set +a`)
+- **Credentials**: `SWYPE_EMAIL` and `SWYPE_PASSWORD` environment variables, exported in your shell for the run (they are no longer in `.env`; the portal keeps each business's Swype login under Setup -> Businesses)
 - **Session**: `ASP.NET_SessionId` cookie (set by server on successful login)
 - **Re-auth**: `with_reauth()` helper re-logs in automatically on 401/session-expired
 
@@ -176,7 +176,7 @@ with open("report.xlsx", "wb") as f:
 
 - Sessions expire on the server side (ASP.NET session); script re-authenticates automatically
 - The export page is a large HTML payload (~2.4 MB) — first call for items-csv takes a few seconds
-- Credentials come from `.env`; update `SWYPE_PASSWORD` there if the password changes
+- Credentials come from the `SWYPE_EMAIL` / `SWYPE_PASSWORD` environment variables set in your shell
 - No CAPTCHA on login as of the time of reverse engineering; if one appears, `GetImageVerify` must be called first to get a `VerifyId`/`VerifyCode` pair
 - **Item Sales API requires form-encoded POST** (`application/x-www-form-urlencoded`). A JSON body causes the server to return `excelKey: ""` (silent failure)
 - `excelKey` filenames are time-scoped — download immediately after the POST; the server may delete stale files

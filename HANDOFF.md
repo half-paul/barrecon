@@ -126,8 +126,8 @@ Spec: docs/bar-inventory-portal-spec.md v0.7. Decisions 1-9 at the top are locke
   overlapping different periods are refused. Imports screen has a "Swype item sales" section.
 - Download with scripts/csv_export_api/api_client.py (`fetch_item_sales_excel`), one Mon-Sun week
   per count. Or from the portal (2026-10-29): Imports -> From/To dates -> "Import from Swype" calls
-  POST /api/imports/swype-item-sales/fetch, which logs in to Swype (services/swype_api.py, SWYPE_EMAIL /
-  SWYPE_PASSWORD from .env), pulls the report and runs the same apply; batch source "swype_api".
+  POST /api/imports/swype-item-sales/fetch, which logs in to Swype (services/swype_api.py, the
+  business's own Swype login from Setup -> Businesses, password encrypted; no longer in .env), pulls the report and runs the same apply; batch source "swype_api".
   Since 2026-11-03 the page imports ONE DAY AT A TIME: both "Import from Swype" (From/To) and "Import new
   sales" (day after the latest imported period through yesterday; today is still selling) loop the days
   in the browser, one POST /fetch per day (date_from == date_to), with a progress bar. A day Swype reports

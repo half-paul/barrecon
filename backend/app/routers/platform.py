@@ -295,7 +295,7 @@ def tenant_detail(tenant_id: str, db: Session = Depends(get_db)):
     users = [{"id": u.id, "username": u.username, "display_name": u.display_name, "email": u.email, "is_admin": u.is_admin,
               "is_active": u.is_active, "mfa_enabled": bool(u.totp_enabled_at), "invite_pending": u.password_hash == auth.INVITED,
               "last_login_at": u.last_login_at}
-             for u in db.query(User).filter(User.tenant_id == t.id).order_by(User.is_active.desc(), User.is_admin.desc(), func.lower(User.display_name))]
+             for u in db.query(User).filter(User.tenant_id == t.id, User.deleted_at.is_(None)).order_by(User.is_active.desc(), User.is_admin.desc(), func.lower(User.display_name))]
     months = []
     first = usage.month_start()
     for _ in range(12):

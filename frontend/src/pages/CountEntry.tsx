@@ -76,6 +76,26 @@ export default function CountEntry() {
     } catch (e) { setMsg({ kind: "error", text: (e as Error).message }); }
   };
 
+  /** One item fixed on a posted count: the server posts a new version with that one line changed and keeps this one as history. */
+  const [fix, setFix] = useState<{ item_id: string; value: string; reason: string } | null>(null);
+  const fixRef = useRef<HTMLDivElement>(null);
+  const startFix = (l: CountLine) => {
+    setFix({ item_id: l.item_id, value: valueOf(l, {}), reason: "" });
+    fixRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const correct = async () => {
+    const l = sess.data?.lines.find((x) => x.item_id === fix?.item_id);
+    if (!sess.data || !fix || !l) return;
+    const now = blank(fix.value) ? "not counted (taken out of the count)" : `${fix.value} ${l.pack_name ?? "packs"}`;
+    if (!confirm(`Correct ${l.name} on the count from ${dt(sess.data.counted_at)} to ${now}? A new version of the count is posted with only this change; this one is kept as superseded history.`)) return;
+    try {
+      const r = await api.post<CountDetail>(`/api/counts/${id}/corrections`, { item_id: fix.item_id, ...toPacks(fix.value), reason: fix.reason.trim() || null });
+      setFix(null);
+      nav(`/counts/${r.id}`);
+      setMsg({ kind: "ok", text: `${l.name} corrected. The earlier version is kept in the history below.` });
+    } catch (e) { setMsg({ kind: "error", text: (e as Error).message }); }
+  };
+
   const [find, setFind] = useState("");
   const [show, setShow] = useState<"all" | "todo" | "done">("all");
   const s = sess.data;
@@ -86,6 +106,9 @@ export default function CountEntry() {
   const groups = useMemo(() => groupBy(visible, (l) => l.category ?? "Uncategorised"), [visible]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!s) return <Page title="Count">{sess.error ? <Notice kind="error">{sess.error}</Notice> : <Loading rows={10} />}</Page>;
   const ro = s.status !== "draft" || viewOnly;
+  const canFix = s.status === "posted" && !viewOnly;
+  const onFix = canFix ? startFix : undefined;
+  const fixLine = s.lines.find((l) => l.item_id === fix?.item_id);
   const totalCounted = s.lines.filter(counted).length;
 
   return (
@@ -102,7 +125,27 @@ export default function CountEntry() {
         {s.status === "deleted" ? "It is kept as history; variance and on-hand don’t use it."
           : s.status === "superseded" && s.superseded_by
           ? <>It was replaced by a <Link className="underline" to={`/counts/${s.superseded_by}`}>newer version</Link>.</>
+          : canFix ? "To fix an item, use Correct one item below or the correct link next to it."
           : "To correct the numbers, start a new count at the same date and time."}</Notice>}
+      {canFix && (
+        <div ref={fixRef} className="card p-4 mb-4 flex flex-wrap items-end gap-3 text-sm">
+          <label className="flex flex-col gap-1"><span className="text-muted">Correct one item</span>
+            <select className={inputCls} value={fix?.item_id ?? ""}
+              onChange={(e) => { const l = s.lines.find((x) => x.item_id === e.target.value); setFix(l ? { item_id: l.item_id, value: valueOf(l, {}), reason: fix?.reason ?? "" } : null); }}>
+              <option value="">Choose an item…</option>
+              {s.lines.map((l) => <option key={l.item_id} value={l.item_id}>{l.name}</option>)}
+            </select></label>
+          <label className="flex flex-col gap-1"><span className="text-muted">New qty{fixLine ? ` (${fixLine.pack_name ?? "packs"})` : ""}</span>
+            <input className={`${inputCls} num w-24`} inputMode="decimal" disabled={!fix} value={fix?.value ?? ""} placeholder="blank = out"
+              onChange={(e) => { const t = typed(e.target.value); if (t !== null && fix) setFix({ ...fix, value: t }); }} /></label>
+          <label className="flex flex-col gap-1 grow max-w-md"><span className="text-muted">Reason (optional)</span>
+            <input className={inputCls} disabled={!fix} value={fix?.reason ?? ""} placeholder="e.g. 45 cans, saved with the wrong pack size"
+              onChange={(e) => fix && setFix({ ...fix, reason: e.target.value })} /></label>
+          <Button onClick={correct} disabled={!fix}>Correct item</Button>
+          {fix && <button type="button" className="text-sm underline text-muted" onClick={() => setFix(null)}>Cancel</button>}
+          <span className="text-xs text-muted basis-full">Qty in packs, like the count itself (5.7 is 5 whole and an open one seven tenths full). Posts a new version with only this item changed and recalculates its stock units from the item’s current pack size; this version stays as history. Leave the qty blank to take the item out of the count.</span>
+        </div>
+      )}
       {s.status === "posted" && (
         <div className="card p-4 mb-4 flex flex-wrap items-end gap-3 text-sm">
           <label className="flex flex-col gap-1"><span className="text-muted">Move to date and time</span>
@@ -143,14 +186,14 @@ export default function CountEntry() {
         <div className="hidden md:block table-box"><table className="grid">
           <thead><tr><th>Item</th><th>Pack</th><th className="r">Qty</th><th></th><th className="r">In stock units</th></tr></thead>
           <tbody>
-            {groups.map(([cat, lines]) => (<Group key={cat} cat={cat} lines={lines} ro={ro} edits={edits} setEdits={setEdits} />))}
+            {groups.map(([cat, lines]) => (<Group key={cat} cat={cat} lines={lines} ro={ro} edits={edits} setEdits={setEdits} onFix={onFix} />))}
           </tbody>
         </table></div>
         <div className="md:hidden flex flex-col gap-4">
           {groups.map(([cat, lines]) => (
             <section key={cat}>
               <h2 className="label mb-2">{cat}</h2>
-              <div className="flex flex-col border-t border-line-strong">{lines.map((l) => <CountCard key={l.item_id} l={l} ro={ro} edits={edits} setEdits={setEdits} />)}</div>
+              <div className="flex flex-col border-t border-line-strong">{lines.map((l) => <CountCard key={l.item_id} l={l} ro={ro} edits={edits} setEdits={setEdits} onFix={onFix} />)}</div>
             </section>))}
         </div>
       </>)}
@@ -178,10 +221,21 @@ const toPacks = (v: string) => {
 /** Typed text as a qty, a comma counting as the decimal point; null when it is not a number, so the keystroke is dropped. */
 const typed = (v: string) => { const t = v.trim().replace(",", "."); return /^\d*\.?\d*$/.test(t) ? t : null; };
 const TENTHS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+type FixProp = { onFix?: (l: CountLine) => void };
+/** Stock units the count holds: what was saved for a posted count, else packs × pack size. `stale` when the saved
+ * number no longer matches packs × the item’s current pack size (saved while the pack size was different). */
+const stockUnits = (l: CountLine, v: string, ro: boolean) => {
+  const calc = (Number(v) || 0) * Number(l.pack_size);
+  const saved = ro && l.qty != null && !blank(v) ? Number(l.qty) : null;
+  return { units: saved ?? calc, stale: saved != null && Math.abs(saved - calc) > 1e-6, calc };
+};
+const fixLink = (l: CountLine, onFix: FixProp["onFix"]) => onFix &&
+  <button type="button" className="ml-2 text-xs underline text-muted hover:text-ink" aria-label={`Correct ${l.name}`} onClick={() => onFix(l)}>correct</button>;
 
 /** One item as a card for phones: one qty box with a whole-pack stepper, and tap-a-tenth to set the open pack in that same qty. */
-function CountCard({ l, ro, edits, setEdits }: { l: CountLine; ro: boolean; edits: Edits; setEdits: React.Dispatch<React.SetStateAction<Edits>> }) {
+function CountCard({ l, ro, edits, setEdits, onFix }: { l: CountLine; ro: boolean; edits: Edits; setEdits: React.Dispatch<React.SetStateAction<Edits>> } & FixProp) {
   const v = valueOf(l, edits);
+  const su = stockUnits(l, v, ro);
   const qty = Number(v) || 0, whole = Math.floor(qty), open = qty - whole;
   const decimals = v.includes(".") ? v.slice(v.indexOf(".")) : "";
   const keg = (l.pack_name ?? "").toLowerCase().includes("keg");
@@ -190,9 +244,10 @@ function CountCard({ l, ro, edits, setEdits }: { l: CountLine; ro: boolean; edit
   return (
     <div className="py-3 border-b border-line">
       <div className="flex items-baseline justify-between gap-2 mb-2">
-        <div className="font-medium">{l.name}</div>
+        <div className="font-medium">{l.name}{fixLink(l, onFix)}</div>
         <div className={`text-xs shrink-0 num ${blank(v) ? "text-accent" : "text-muted"}`}>{blank(v) ? "not counted" : `${qty.toFixed(1)} ${l.pack_name ?? "packs"}`}</div>
       </div>
+      {su.stale && <div className="text-xs text-danger mb-2">Saved as {su.units.toLocaleString("en-CA", { maximumFractionDigits: 2 })} {l.stock_unit}; at today’s pack size that is {su.calc.toLocaleString("en-CA", { maximumFractionDigits: 2 })}. Correct it to recalculate.</div>}
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs text-muted w-14">Qty</span>
         <button type="button" className={step} disabled={ro || whole <= 0} aria-label={`One less ${l.name}`} onClick={() => set(`${whole - 1}${decimals}`)}>−</button>
@@ -217,19 +272,22 @@ function CountCard({ l, ro, edits, setEdits }: { l: CountLine; ro: boolean; edit
   );
 }
 
-function Group({ cat, lines, ro, edits, setEdits }: { cat: string; lines: CountLine[]; ro: boolean; edits: Edits; setEdits: React.Dispatch<React.SetStateAction<Edits>> }) {
+function Group({ cat, lines, ro, edits, setEdits, onFix }: { cat: string; lines: CountLine[]; ro: boolean; edits: Edits; setEdits: React.Dispatch<React.SetStateAction<Edits>> } & FixProp) {
   return (<>
     <tr className="section"><td colSpan={5}>{cat}</td></tr>
     {lines.map((l) => {
       const v = valueOf(l, edits);
       const qty = Number(v) || 0;
       const keg = (l.pack_name ?? "").toLowerCase().includes("keg");
+      const su = stockUnits(l, v, ro);
       return (
         <tr key={l.item_id}>
-          <td>{l.name}</td><td className="text-muted">{l.pack_name}</td>
+          <td>{l.name}{fixLink(l, onFix)}</td><td className="text-muted">{l.pack_name}</td>
           <td className="r"><input className="cell-input num" disabled={ro} inputMode="decimal" aria-label={`${l.name} qty`} value={v} onChange={(ev) => { const t = typed(ev.target.value); if (t !== null) setEdits((x) => ({ ...x, [l.item_id]: t })); }} onFocus={(ev) => ev.target.select()} /></td>
           <td className="w-6">{l.stock_unit === "each" ? null : <Bottle fraction={qty - Math.floor(qty)} keg={keg} />}</td>
-          <td className="r num text-muted">{blank(v) ? "" : (qty * Number(l.pack_size)).toLocaleString("en-CA", { maximumFractionDigits: 0 })}</td>
+          <td className={`r num ${su.stale ? "text-danger" : "text-muted"}`}
+            title={su.stale ? `Saved as ${su.units} ${l.stock_unit}, but ${v} × today’s pack size (${Number(l.pack_size)}) is ${su.calc}. Correct this item to recalculate.` : undefined}>
+            {blank(v) ? "" : <>{su.units.toLocaleString("en-CA", { maximumFractionDigits: 0 })}{su.stale && " ⚠"}</>}</td>
         </tr>
       );
     })}

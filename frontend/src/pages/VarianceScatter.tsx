@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type VariancePool, type VarianceRow, n } from "../lib/api";
+import { type VariancePool, type VarianceRow, n, cents } from "../lib/api";
 
 // One dot per stock item: units sold (menu items that use it, from Swype × recipes) across, the difference
 // as a % of recipe usage up and down. Same sign as the ledger: above zero = more left than expected (over),
@@ -21,7 +21,7 @@ function niceStep(span: number, target: number) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
 }
 const signed = (v: number, dp = 0) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${n(Math.abs(v), dp)}%`;
-const money = (v: number) => `${v < 0 ? "−" : "+"}$${n(Math.abs(v), 2)}`;
+const money = (v: number) => `${v < 0 ? "−" : "+"}$${cents(Math.abs(v))}`;
 
 /** The Swype items that pour from a set ("Mystery Wine / Wine Special"): the ones whose recipe offers the choice,
  *  else any that sold from it, else the stock items when nothing sold. */

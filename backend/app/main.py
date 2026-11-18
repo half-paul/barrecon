@@ -10,7 +10,7 @@ from .audit import AuditMiddleware, install_guards
 from .config import settings
 from . import tenancy  # noqa: F401 - registers the tenant and business filters
 from .db import Base, SessionLocal, add_missing_columns, engine, upgrade_tenancy
-from .routers import auth, businesses, counts, deliveries, groups, imports, items, mfa, movements, platform, recipes, search, swype_items, users, variance
+from .routers import auth, businesses, counts, deliveries, groups, imports, items, mfa, movements, platform, recipes, reports, search, swype_items, users, variance
 from .routers import settings as settings_router
 from .seed import seed
 from .services import maintenance, swype_auto
@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Bar reconciliation portal", version="0.1.0", lifespan=lifespan)
 for r in (auth.router, mfa.router, items.router, counts.router, movements.router, imports.router, search.router, settings_router.router,
-          recipes.router, variance.router, groups.router, swype_items.router, deliveries.router, users.router, users.audit_router, businesses.router, platform.router):
+          recipes.router, variance.router, reports.router, groups.router, swype_items.router, deliveries.router, users.router, users.audit_router, businesses.router, platform.router):
     app.include_router(r)
 app.add_middleware(AuditMiddleware)
 

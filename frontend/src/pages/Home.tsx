@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { api, type CurrentPeriod, type VarianceReport, type Batch, type CountSession, type Issue, type Item, type Movement, type Settings, d, datasetName, dayRanges, n } from "../lib/api";
 import { Empty, Page, useAsync } from "../lib/ui";
+import BarPerformance from "./BarPerformance";
 
 const DAY = 86400000;
 
@@ -34,6 +35,7 @@ export default function Home() {
   return (
     <Page title="Overview" sub={last ? `Since the last count on ${d(last.counted_at)}` : undefined}>
       <ThisWeek />
+      <BarPerformance />
       <div className="stats mb-8">
         <Stat label="Last count" value={daysSince == null ? "None yet" : daysSince === 0 ? "Today" : `${daysSince} day${daysSince === 1 ? "" : "s"} ago`}
           sub={draft ? <Link className="underline" to={`/counts/${draft.id}`}>A draft count is open: resume</Link>

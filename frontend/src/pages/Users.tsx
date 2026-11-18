@@ -75,6 +75,14 @@ export default function Users() {
       users.reload();
     } catch (e) { fail(e); }
   };
+  const remove = async (u: UserRow) => {
+    if (!confirm(`Delete ${u.display_name} for good? Their login, email, PIN and access are removed and can’t be restored. The audit log keeps everything they did, under their name.`)) return;
+    try {
+      await api.del(`/api/users/${u.id}`);
+      setMsg({ kind: "ok", text: `${u.display_name} is deleted. Their entries stay in the audit log.` });
+      users.reload();
+    } catch (e) { fail(e); }
+  };
   const setPassword = async (u: UserRow, pw: string) => {
     try { await api.post(`/api/users/${u.id}/password`, { password: pw }); setMsg({ kind: "ok", text: `New password set for ${u.display_name}. They are logged out everywhere.` }); users.reload(); }
     catch (e) { fail(e); }
@@ -115,7 +123,8 @@ export default function Users() {
                 {u.id !== me?.id && (u.is_active
                   ? <><button className="text-sm text-muted hover:text-ink underline ml-3" onClick={() => act(u, "logout")}>Log out</button>
                       <button className="text-sm text-danger hover:underline ml-3" onClick={() => act(u, "deactivate")}>Switch off</button></>
-                  : <button className="text-sm text-accent hover:underline ml-3" onClick={() => act(u, "activate")}>Switch on</button>)}
+                  : <><button className="text-sm text-accent hover:underline ml-3" onClick={() => act(u, "activate")}>Switch on</button>
+                      <button className="text-sm text-danger hover:underline ml-3" aria-label={`Delete ${u.display_name}`} onClick={() => remove(u)}>Delete</button></>)}
               </td>
             </tr>))}
           </tbody>

@@ -401,6 +401,11 @@ class SwypeMenuItem(Base):
     category: Mapped[str | None] = mapped_column(String(120))
     source: Mapped[str] = mapped_column(String(16))  # sales | csv (where it was first seen)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())  # a sale switches it back on
+    # Selling price from the latest Item Sales period with paid units: Amt / Qty (combo/promo/free units excluded).
+    price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    price_period_to: Mapped[date | None] = mapped_column(Date)  # last day of the period the price came from
+    # "Default Price" from Swype's Export Item file, kept to cross-check the sales price.
+    catalogue_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -529,7 +534,9 @@ class User(Base):
     level per area in each business they are a member of (BusinessMember.permissions = {"counts": "edit", ...};
     a missing area means no access). `permissions` here is what the single bar used before businesses and is no
     longer read. is_platform_admin logins have no tenant and only reach the platform console.
-    Bumping session_version logs the user out everywhere (password reset, deactivation)."""
+    Bumping session_version logs the user out everywhere (password reset, deactivation).
+    A deleted login keeps its row (audit events point at it and are hash-chained), with deleted_at set, its
+    display name kept for the log, and everything else that could sign in or identify it scrubbed."""
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.id"), index=True)
@@ -550,6 +557,7 @@ class User(Base):
     session_version: Mapped[int] = mapped_column(Integer, default=1)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # see the docstring
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

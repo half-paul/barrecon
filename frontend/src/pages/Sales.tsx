@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type CurrentPeriod, type MenuSync, type Settings, d, dayRanges, dt, menuText, n } from "../lib/api";
+import { api, type CurrentPeriod, type MenuSync, type Settings, d, dayRanges, dt, menuText, n, priceAlertText, cents } from "../lib/api";
 import { SoldItems } from "../lib/soldItems";
 import { Button, Empty, Field, FileButton, Flash, Loading, Notice, Page, inputCls, useAsync } from "../lib/ui";
 
@@ -9,7 +9,7 @@ type SalesApplied = { period_from: string; period_to: string; items: number; ins
 type DayFetched = (SalesApplied & { status: "ok" }) | { status: "no_sales"; period_from: string; period_to: string };
 type SalesPeriod = { period_from: string; period_to: string; items: number; total_qty: number; net_amount: number };
 const day = (iso: string) => d(`${iso}T12:00:00`);
-const money = (v: number) => `$${n(v, 2)}`;
+const money = (v: number) => `$${cents(v)}`;
 const iso = (x: Date) => x.toLocaleDateString("en-CA");
 /** Every day from..to inclusive, as YYYY-MM-DD. */
 function daysBetween(from: string, to: string) {
@@ -80,7 +80,8 @@ export default function Sales() {
       if (noSales.length) parts.push(`no sales on ${noSales.map(day).join(", ")}`);
       const off = imported.reduce((t, r) => t + (r.menu.deactivated ?? 0), 0);
       if (off) parts.push(`${off} Swype items switched off (nothing sold in a month)`);
-      const text = `Swype sales ${dayRanges(days)}: ${parts.join("; ")}.`;
+      const last = imported[imported.length - 1];  // price alerts describe the menu after the latest day
+      const text = `Swype sales ${dayRanges(days)}: ${parts.join("; ")}${last ? priceAlertText(last.menu) : ""}.`;
       setMsg(error ? { kind: "error", text: `${text} ${error}` } : { kind: "ok", text });
     } finally { setProgress(null); setBusy(false); reloadAll(); }
   };

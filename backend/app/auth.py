@@ -35,6 +35,7 @@ AREAS: dict[str, tuple[str, tuple[str, ...]]] = {
     "deliveries": ("Deliveries and stock movements", ("view", "edit")),
     "sales": ("Swype sales", ("view", "edit")),
     "variance": ("Stock vs sales", ("view",)),
+    "reports": ("Reports", ("view",)),
     "items": ("Stock items and groups", ("view", "edit")),
     "swype_items": ("Swype items", ("view", "edit")),
     "recipes": ("Recipes", ("view", "edit")),

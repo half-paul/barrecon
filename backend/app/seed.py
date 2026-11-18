@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from .auth import hash_password
 from .config import settings
 from .models import BusinessMember, Location, Tenant, Unit, User
-from .services import secretbox
 from .units import BASE_UNITS
 
 DEFAULT_LOCATION_NAME = "Main bar"
@@ -33,9 +32,6 @@ def _first_tenant(db: Session) -> Tenant:
         db.flush()
     for b in db.query(Location).filter(Location.tenant_id.is_(None)):
         b.tenant_id = tenant.id
-        if not b.swype_email and settings.swype_email:  # the Swype login used to come from .env
-            b.swype_email, b.swype_password = settings.swype_email, secretbox.seal(settings.swype_password)
-            b.swype_company, b.swype_store_id = settings.swype_company, settings.swype_store_id
     for u in db.query(User).filter(User.tenant_id.is_(None), User.is_platform_admin.is_(False)):
         u.tenant_id = tenant.id
         if loc and not u.is_admin and not db.get(BusinessMember, (u.id, loc.id)):

@@ -26,8 +26,6 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-to-a-long-random-string}
       TIMEZONE: ${TZ:-America/Vancouver}
-      SWYPE_EMAIL: ${SWYPE_EMAIL:-}
-      SWYPE_PASSWORD: ${SWYPE_PASSWORD:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ADMIN_MFA_REQUIRED: ${ADMIN_MFA_REQUIRED:-false}
       PUBLIC_URL: ${PUBLIC_URL:-}

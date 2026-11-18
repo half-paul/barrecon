@@ -5,7 +5,7 @@ from decimal import ROUND_FLOOR, Decimal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -139,6 +139,55 @@ def set_date(session_id: str, body: CountDateIn, db: Session = Depends(get_db)):
     try:
         new = inv.redate_count(db, s, body.counted_at, note)
     except inv.InventoryError as e:
+        raise HTTPException(400, str(e)) from None
+    db.commit()
+    db.refresh(new)
+    return _detail(new, db)
+
+
+class CountCorrectionIn(BaseModel):
+    """One item's new count on a posted count, in packs. Both blank takes the item out of the count."""
+    item_id: str
+    packs_full: Decimal | None = Field(default=None, ge=0)
+    packs_partial: Decimal | None = Field(default=None, ge=0)
+    reason: str | None = None
+
+
+def _num(v: Decimal) -> str:
+    return f"{v.normalize():f}"
+
+
+@router.post("/{session_id}/corrections", response_model=CountSessionDetail)
+def correct_line(session_id: str, body: CountCorrectionIn, db: Session = Depends(get_db)):
+    """Correct one item on a posted count. The count gets a new posted version with that one line changed and
+    the old version is kept as superseded history. Returns the count now in effect (a new id)."""
+    s = db.get(CountSession, session_id)
+    if not s:
+        raise HTTPException(404)
+    if s.status == "draft":
+        raise HTTPException(400, "this count is a draft; change the number on the count itself")
+    if s.status == "deleted":
+        raise HTTPException(400, "this count was deleted")
+    if s.status != "posted":
+        raise HTTPException(400, "this count was replaced by a newer version; change that one instead")
+    it = db.get(InventoryItem, body.item_id)
+    if not it:
+        raise HTTPException(400, f"unknown item {body.item_id}")
+    old = next((ln for ln in s.lines if ln.item_id == it.id), None)
+    was = "not counted" if old is None else f"{_num(Decimal(old.packs_full) + Decimal(old.packs_partial))} ({_num(Decimal(old.qty))} {it.stock_unit})"
+    if body.packs_full is None and body.packs_partial is None:
+        now = "not counted"
+    else:
+        packs = Decimal(body.packs_full or 0) + Decimal(body.packs_partial or 0)
+        now = f"{_num(packs)} ({_num(packs * Decimal(it.pack_size))} {it.stock_unit})"
+    note = f"{it.name} corrected from {was} to {now}"
+    note += f": {body.reason.strip()}" if body.reason and body.reason.strip() else ""
+    if s.note:
+        note += f" · {s.note}"
+    try:
+        new = inv.correct_count_line(db, s, it, body.packs_full, body.packs_partial, note)
+    except inv.InventoryError as e:
+        db.rollback()
         raise HTTPException(400, str(e)) from None
     db.commit()
     db.refresh(new)

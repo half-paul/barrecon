@@ -16,7 +16,7 @@ bare bottle code (00000330 "Smirnoff Vodka") -> a single when the same code also
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -196,6 +196,13 @@ def codes_using(db: Session, item_ids: list[str]) -> dict[str, list[tuple[str, s
 
 # ---------- the menu: every Swype item # that has sold, with its recipe ----------
 
+SOLD_WINDOW_DAYS = 90  # Recipes page sold counts cover this many days back from today
+
+
+def recent_from() -> date:
+    return date.today() - timedelta(days=SOLD_WINDOW_DAYS)
+
+
 def sold_codes(db: Session, location_id: str, date_from: date | None = None, date_to: date | None = None) -> list[dict]:
     """One row per Swype item # in the imported sales: latest name/category, total sold, weeks on file.
     With date_from/date_to, sold and weeks count only imported periods overlapping that range (a period is
@@ -232,7 +239,7 @@ def menu(db: Session, location_id: str) -> list[dict]:
     guess at the bottle a pour comes out of, for prefilling the editor; it is not saved anywhere."""
     oz_ml = settings_svc.oz_ml(db)
     recipes = load_all(db)
-    rows = sold_codes(db, location_id)
+    rows = sold_codes(db, location_id, recent_from())
     known = {r["code"] for r in rows}
     for m in db.scalars(select(SwypeMenuItem)):  # on the menu, nothing sold on file
         if m.code not in known:

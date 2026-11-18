@@ -37,7 +37,7 @@ from typing import Optional
 import requests
 
 # ---------------------------------------------------------------------------
-# Credentials (from the environment, see .env) & config
+# Credentials (SWYPE_EMAIL / SWYPE_PASSWORD exported in your shell) & config
 # ---------------------------------------------------------------------------
 BASE_URL = "https://swypepos.com/RMC"
 COMPANY  = "caffebarney"

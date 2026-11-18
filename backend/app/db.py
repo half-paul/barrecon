@@ -26,7 +26,8 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 # columns added after their table was first created; create_all only makes missing tables
 ADDED_COLUMNS = {
     "swype_menu_items": {"custom_name": "VARCHAR(200)", "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
-                         "location_id": "VARCHAR(36) REFERENCES locations(id)"},
+                         "location_id": "VARCHAR(36) REFERENCES locations(id)",
+                         "price": "NUMERIC(10, 2)", "price_period_to": "DATE", "catalogue_price": "NUMERIC(10, 2)"},
     "recipes": {"steps": "TEXT", "location_id": "VARCHAR(36) REFERENCES locations(id)"},
     "stock_movements": {"delivery_id": "VARCHAR(36) REFERENCES deliveries(id)"},
     "delivery_lines": {"receipt_sku": "VARCHAR(64)"},
@@ -35,7 +36,7 @@ ADDED_COLUMNS = {
     "users": {"pin_hash": "VARCHAR(255)", "email": "VARCHAR(254)", "totp_secret": "VARCHAR(255)",
               "totp_enabled_at": "TIMESTAMP WITH TIME ZONE", "totp_last_step": "INTEGER", "recovery_codes": "JSON",
               "tenant_id": "VARCHAR(36) REFERENCES tenants(id)", "is_platform_admin": "BOOLEAN NOT NULL DEFAULT FALSE",
-              "last_location_id": "VARCHAR(36)"},
+              "last_location_id": "VARCHAR(36)", "deleted_at": "TIMESTAMP WITH TIME ZONE"},
     "audit_events": {"seq": "INTEGER", "prev_hash": "VARCHAR(64)", "hash": "VARCHAR(64)",
                      "tenant_id": "VARCHAR(36)", "location_id": "VARCHAR(36)"},
     "locations": {"tenant_id": "VARCHAR(36) REFERENCES tenants(id)", "kind": "VARCHAR(32)", "address": "VARCHAR(300)",
