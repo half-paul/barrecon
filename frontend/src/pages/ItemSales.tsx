@@ -201,7 +201,8 @@ function SalesChart({ report, metric, lines, colors, hidden, onToggle, onZoom }:
 
 export default function ItemSalesReport() {
   const [params, setParams] = useSearchParams();
-  const qFrom = params.get("from") ?? "", qTo = params.get("to") ?? "";
+  // No dates in the URL → last 30 days.
+  const qTo = params.get("to") ?? todayIso(), qFrom = params.get("from") ?? iso(dayNum(qTo) - 29);
   const query = new URLSearchParams(Object.entries({ from: qFrom, to: qTo }).filter(([, v]) => v)).toString();
   const r = useAsync(() => api.get<Report>(`/api/reports/item-sales?${query}`), [query]);
   const p = r.data;
@@ -296,9 +297,12 @@ export default function ItemSalesReport() {
           <input type="date" className={inputCls} value={p?.to ?? qTo} min={p?.from}
             onChange={(e) => e.target.value && setRange(p?.from ?? qFrom, e.target.value, false)} /></label>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Quick ranges">
-          {([[7, "7d"], [30, "30d"], [90, "90d"], [365, "1y"]] as const).map(([k, l]) => (
-            <button key={k} type="button" className={toggle(false)} onClick={() => preset(k)}>{l}</button>))}
-          {p?.bounds.from && <button type="button" className={toggle(false)} onClick={() => setRange(p.bounds.from!, p.bounds.to!)}>All</button>}
+          {([[7, "7d"], [30, "30d"], [90, "90d"], [365, "1y"]] as const).map(([k, l]) => {
+            const on = qTo === todayIso() && dayNum(qTo) - dayNum(qFrom) + 1 === k;
+            return <button key={k} type="button" aria-pressed={on} className={toggle(on)} onClick={() => preset(k)}>{l}</button>;
+          })}
+          {p?.bounds.from && <button type="button" aria-pressed={qFrom === p.bounds.from && qTo === p.bounds.to}
+            className={toggle(qFrom === p.bounds.from && qTo === p.bounds.to)} onClick={() => setRange(p.bounds.from!, p.bounds.to!)}>All</button>}
           <button type="button" className={toggle(false)} onClick={zoomOut} disabled={!p}>Zoom out</button>
         </div>
       </div>
