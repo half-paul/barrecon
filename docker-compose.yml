@@ -41,7 +41,7 @@ services:
       TZ: ${TZ:-America/Vancouver}
       HOST: 0.0.0.0
     ports:
-      - "${PORT:-8080}:8000"   # localhost only; use "${PORT:-8080}:8000" to reach it from the LAN
+      - "${PORT:-8282}:8000"   # localhost only; use "${PORT:-8282}:8000" to reach it from the LAN
     depends_on:
       db:
         condition: service_healthy

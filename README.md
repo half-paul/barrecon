@@ -12,7 +12,7 @@ HANDOFF.md for where the build stands.
     cp .env.example .env        # edit ADMIN_PASSWORD and SESSION_SECRET
     docker compose up -d --build
 
-Open http://localhost:8080 and log in as `admin` with ADMIN_PASSWORD (only used to create that
+Open http://localhost:8282 and log in as `admin` with ADMIN_PASSWORD (only used to create that
 first login; then add people under Setup -> Users and change your password under My account). The database lives in a
 named Docker volume; nightly pg_dump files land in ./backups (point BACKUP_DIR in
 .env at a Google Drive for Desktop folder to get them off the PC).
